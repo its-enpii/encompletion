@@ -171,18 +171,6 @@ export default function LoginPage() {
               </div>
             </form>
           </Card>
-
-          {/* Footer meta — surface useful build info instead of setup
-              instructions. Operators can hit /api/health for the same data
-              programmatically. */}
-          <div className="mt-5 flex items-center justify-center gap-2 text-[10px] font-medium uppercase tracking-[0.18em] text-[var(--ink-3)]">
-            <span className="h-1 w-1 rounded-full bg-[var(--success)]" />
-            <span>Live streaming</span>
-            <span className="text-[var(--ink-3)]/50">·</span>
-            <span>9Router</span>
-            <span className="text-[var(--ink-3)]/50">·</span>
-            <span>v1</span>
-          </div>
         </div>
       </div>
     </div>
