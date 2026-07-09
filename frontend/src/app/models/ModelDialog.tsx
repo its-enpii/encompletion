@@ -96,7 +96,7 @@ export function ModelDialog({ value, onClose, onSubmit }: Props) {
       open
       onClose={() => { if (!busy) onClose(); }}
       title={isEdit ? `Edit model: ${(value as any).model.label}` : "Tambah model"}
-      description="Key dipakai CLI Claude sebagai --model. Label tampil di dropdown."
+      description="Key dikirim ke backend engine via CLI flag. Label tampil di dropdown."
       widthClass="max-w-md"
       footer={
         <>
@@ -115,16 +115,16 @@ export function ModelDialog({ value, onClose, onSubmit }: Props) {
             label="Key (CLI flag)"
             value={key}
             onChange={(e) => setKey(e.target.value.trim().toLowerCase())}
-            placeholder="claude-sonnet-4-6"
+            placeholder="workspace"
             autoFocus
-            hint="lowercase kebab-case, contoh: claude-opus-4-8 atau workspace"
+            hint="lowercase kebab-case, contoh: opus-4-8 atau workspace"
           />
         )}
         <TextField
           label="Label (tampil di dropdown)"
           value={label}
           onChange={(e) => setLabel(e.target.value)}
-          placeholder="Sonnet 4.6"
+          placeholder="Workspace"
         />
         <div className="flex items-center gap-4">
           <label className="flex flex-1 items-center gap-2 text-sm text-[var(--ink-2)]">

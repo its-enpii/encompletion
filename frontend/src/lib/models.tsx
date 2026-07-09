@@ -48,7 +48,8 @@ export function ModelsProvider({ children }: { children: ReactNode }) {
         headers: (() => {
           const h = new Headers();
           if (typeof window !== "undefined") {
-            const t = window.localStorage.getItem("claude-web-token");
+            const t = window.localStorage.getItem("app:token")
+              || window.localStorage.getItem("claude-web-token");
             if (t) h.set("Authorization", `Bearer ${t}`);
           }
           return h;

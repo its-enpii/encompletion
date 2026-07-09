@@ -23,7 +23,7 @@ export function CodeBlock({
   })();
 
   // Extract inline filename if the assistant wrote a "title: foo.ts" comment
-  // on the first line — common with Claude when generating project files.
+  // on the first line — common with the assistant when generating project files.
   const inferredFile = useMemo(() => {
     const txt = codeRef.current?.textContent || "";
     const m =

@@ -1,18 +1,19 @@
 "use client";
 
 import { useEffect, useState, createContext, useContext, ReactNode } from "react";
+import { getStored, setStored, clearStored } from "./store";
 
-const TOKEN_KEY = "claude-web-token";
+// Storage key under the app: prefix. `getStored`/`setStored` migrate the
+// legacy "claude-web-token" value forward on first read.
+const TOKEN_NAME = "token";
 
 export function getToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem(TOKEN_KEY);
+  return getStored(TOKEN_NAME);
 }
 
 export function setToken(token: string | null) {
-  if (typeof window === "undefined") return;
-  if (token) localStorage.setItem(TOKEN_KEY, token);
-  else localStorage.removeItem(TOKEN_KEY);
+  if (token) setStored(TOKEN_NAME, token);
+  else clearStored(TOKEN_NAME);
 }
 
 export function authFetch(input: string, init: RequestInit = {}) {

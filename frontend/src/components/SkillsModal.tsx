@@ -38,7 +38,7 @@ You can reference supporting files in the same folder, e.g. \`examples/sample.md
 `;
 
 /**
- * Skills manager — Encompletion skills at $HOME/.claude/skills/<name>/SKILL.md.
+ * Skills manager — managed at the engine's home skills directory.
  * Opens from the composer without project context.
  */
 export default function SkillsModal({ onClose }: Props) {

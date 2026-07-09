@@ -12,6 +12,7 @@ import { type Artifact } from "@/components/ArtifactViewer";
 import ArtifactPanel from "@/components/ArtifactPanel";
 import { ChatHeader, type ModelOption } from "./Header";
 import { useModels } from "@/lib/models";
+import { getStored, setStored } from "@/lib/store";
 import { Composer } from "./Composer";
 import { MessageList } from "./MessageList";
 import type { Att, Msg, PendingAtt, Usage } from "./types";
@@ -83,30 +84,27 @@ export default function Chat({
   const [showArtifactPanel, setShowArtifactPanelRaw] = useState(false);
   function setShowArtifactPanel(v: boolean) {
     setShowArtifactPanelRaw(v);
-    try { window.localStorage.setItem("claude-web:artifacts:open", v ? "1" : "0"); } catch {}
+    setStored("artifacts:open", v ? "1" : "0");
   }
   useEffect(() => {
-    try {
-      const v = window.localStorage.getItem("claude-web:artifacts:open");
-      if (v === "1") setShowArtifactPanelRaw(true);
-    } catch {}
+    const v = getStored("artifacts:open");
+    if (v === "1") setShowArtifactPanelRaw(true);
   }, []);
 
   const [sidebarRefresh, setSidebarRefresh] = useState(0);
   const [lastTickAt, setLastTickAt] = useState<number | null>(null);
   const [stale, setStale] = useState(false);
 
-  // Restore persisted effort + model.
+  // Restore persisted effort + model. Wrapper reads both new (app:*) and
+  // legacy (claude-web:*) keys, migrates on first hit.
   useEffect(() => {
-    try {
-      const m = window.localStorage.getItem("claude-web:model");
-      if (m) setModel(m);
-      const e = window.localStorage.getItem("claude-web:effort");
-      if (e) setEffort(e);
-    } catch {}
+    const m = getStored("model");
+    if (m) setModel(m);
+    const e = getStored("effort");
+    if (e) setEffort(e);
   }, []);
-  useEffect(() => { try { window.localStorage.setItem("claude-web:model", model); } catch {} }, [model]);
-  useEffect(() => { try { window.localStorage.setItem("claude-web:effort", effort); } catch {} }, [effort]);
+  useEffect(() => { setStored("model", model); }, [model]);
+  useEffect(() => { setStored("effort", effort); }, [effort]);
 
   // Load projects list for the project picker.
   useEffect(() => {
@@ -356,12 +354,15 @@ export default function Chat({
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.id - b.id)
       .map((m) => ({ value: m.key, label: m.label }));
     if (fromRegistry.length > 0) return fromRegistry;
+    // Last-resort fallback when the registry endpoint is unreachable AND
+    // not loading. Generic labels — operators configure real options via
+    // /models. Avoid leaking upstream model names here on purpose.
     return registryLoading
       ? [{ value: "workspace", label: "Workspace" }]
       : [
           { value: "workspace", label: "Workspace" },
-          { value: "claude-sonnet-4-6", label: "Sonnet 4.6" },
-          { value: "claude-haiku-4-5", label: "Haiku 4.5" },
+          { value: "standard", label: "Standard" },
+          { value: "fast", label: "Fast" },
         ];
   }, [registryModels, registryLoading]);
 

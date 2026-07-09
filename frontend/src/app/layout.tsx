@@ -21,8 +21,8 @@ const jetbrains = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Encompletion Web",
-  description: "Web GUI for Encompletion CLI",
+  title: "Encompletion",
+  description: "Encompletion — Web",
 };
 
 export default function RootLayout({

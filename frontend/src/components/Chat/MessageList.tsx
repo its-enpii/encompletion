@@ -138,9 +138,9 @@ function EmptyHero() {
         />
       </div>
 
-      <p className="mt-2 text-[10px] uppercase tracking-[0.2em] text-[var(--ink-4)]">
-        Powered by Encompletion · Opus 4.6
-      </p>
+      {/* No footer attribution — we deliberately do not surface engine
+          identity or model name on the public welcome surface. Operators
+          who want a visible badge can add one here. */}
     </div>
   );
 }

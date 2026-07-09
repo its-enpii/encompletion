@@ -159,7 +159,7 @@ export default function ModelsPage() {
                 </h1>
                 <p className="mt-2 max-w-xl text-sm leading-relaxed text-[var(--ink-3)]">
                   Kelola model yang tersedia di dropdown chat. Tambah key baru (lowercase-kebab), atur label, urutan, dan aktif/nonaktif.
-                  Tidak ada panggilan ke provider — daftar ini hanya memfilter apa yang dikirim lewat <code className="rounded bg-[var(--paper-2)] px-1.5 py-0.5 font-mono text-[11px]">--model</code> ke Claude CLI.
+                  Daftar ini hanya memfilter apa yang dikirim lewat <code className="rounded bg-[var(--paper-2)] px-1.5 py-0.5 font-mono text-[11px]">--model</code> ke backend — tidak ada panggilan keluar sendiri.
                 </p>
               </div>
               <Button variant="primary" size="lg" onClick={() => setModal({ kind: "create" })}>
