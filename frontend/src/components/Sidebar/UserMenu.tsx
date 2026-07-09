@@ -75,7 +75,14 @@ export function UserMenu({ user, onLogout, collapsed = false }: { user: AuthUser
       {open && (
         <div
           role="menu"
-          className="anim-scale-in absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-[var(--r-md)] border border-[var(--line-dark)] bg-[var(--dark-2)] py-1 shadow-[var(--shadow-4)]"
+          // In mini mode the rail is only ~64px wide, so a dropdown anchored
+          // to its bounds would clip long labels ("Signed in as ...").
+          // Anchor to the right of the trigger instead, and lift up from
+          // the bottom so the menu is always visible above the rail's
+          // bottom edge.
+          className={`anim-scale-in absolute bottom-0 mb-2 overflow-hidden rounded-[var(--r-md)] border border-[var(--line-dark)] bg-[var(--dark-2)] py-1 shadow-[var(--shadow-4)] ${
+            collapsed ? "left-full ml-2 w-56" : "left-0 right-0"
+          }`}
         >
           {/* Profile header */}
           <div className="border-b border-[var(--dark-4)] bg-[var(--dark-3)]/50 px-3 py-2">

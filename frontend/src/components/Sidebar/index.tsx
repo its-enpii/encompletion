@@ -294,7 +294,7 @@ export default function Sidebar({
           <button
             type="button"
             onClick={gotoNewChat}
-            title={isMini ? "New chat (N)" : undefined}
+            title="New chat"
             aria-label="New chat"
             className={`group relative flex w-full items-center overflow-hidden rounded-[var(--r-md)] bg-gradient-to-br from-[var(--magenta-400)] to-[var(--magenta-700)] text-sm font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.15),0_2px_8px_rgba(168,71,129,0.30)] transition-all hover:from-[var(--magenta-300)] hover:to-[var(--magenta-600)] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_4px_14px_rgba(168,71,129,0.40)] active:scale-[0.99] ${
               isMini ? "md:justify-center md:px-0 md:py-2.5" : "justify-center gap-2 px-4 py-2.5"
@@ -306,9 +306,6 @@ export default function Sidebar({
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
             <span className={isMini ? "md:hidden" : ""}>New chat</span>
-            <kbd className={`kbd ml-auto !bg-white/15 !border-white/20 !text-white/90 ${isMini ? "md:hidden" : ""}`}>
-              N
-            </kbd>
           </button>
         </div>
 
