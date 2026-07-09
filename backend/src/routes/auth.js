@@ -2,11 +2,17 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import db from '../db/index.js';
 import { signToken, requireAuth } from '../middleware/auth.js';
+import { rateLimit, record, reset } from '../middleware/ratelimit.js';
 
 const router = express.Router();
 
-// Login
-router.post('/login', (req, res) => {
+// Login. The rate gate runs BEFORE bcrypt.compare to ensure we never
+// spend CPU on a brute force (and to bound response time). Successful
+// logins clear that IP+username's history so users don't accumulate
+// failure credit from earlier typos.
+const loginGate = rateLimit({ usernameField: 'username' });
+
+router.post('/login', loginGate, (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) {
     return res.status(400).json({ error: 'username & password required' });
@@ -14,16 +20,26 @@ router.post('/login', (req, res) => {
   const user = db
     .prepare('SELECT id, username, password, role, display_name, disabled FROM users WHERE username = ?')
     .get(username);
+  // On any failure path we record the attempt as not-ok, which feeds
+  // back into the rate gate. Use the same generic message so callers
+  // can't distinguish "no such user" vs "wrong password".
   if (!user || !user.password) {
+    record(req.rateLimitKey, false);
     return res.status(401).json({ error: 'invalid credentials' });
   }
   if (user.disabled) {
+    record(req.rateLimitKey, false);
     return res.status(403).json({ error: 'account disabled' });
   }
   const ok = bcrypt.compareSync(password, user.password);
-  if (!ok) return res.status(401).json({ error: 'invalid credentials' });
+  if (!ok) {
+    record(req.rateLimitKey, false);
+    return res.status(401).json({ error: 'invalid credentials' });
+  }
 
   db.prepare('UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?').run(user.id);
+  reset(req.rateLimitKey);
+  record(req.rateLimitKey, true);
 
   const token = signToken(user);
   res.json({

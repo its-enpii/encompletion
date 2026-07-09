@@ -172,20 +172,16 @@ export default function LoginPage() {
             </form>
           </Card>
 
-          {/* Configured via backend env vars on first boot. We intentionally
-              do not display any default username/password here — the obvious
-              hint would invite drive-by logins. Operators set credentials via
-              BOOTSTRAP_USERNAME / BOOTSTRAP_PASSWORD (or by manually inserting
-              a user) before exposing the app. */}
-          <div className="mt-5 rounded-[var(--r-md)] border border-dashed border-[var(--line)] bg-[var(--paper-2)]/50 p-3 text-xs text-[var(--ink-3)]">
-            <div className="flex items-center gap-1.5">
-              <svg viewBox="0 0 24 24" className="h-3 w-3 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="16" x2="12" y2="12" />
-                <line x1="12" y1="8" x2="12.01" y2="8" />
-              </svg>
-              <span>First time? Lihat <code className="rounded bg-[var(--paper-3)] px-1 py-0.5 font-mono text-[var(--ink-2)]">backend/.env.example</code> untuk setup akun pertama.</span>
-            </div>
+          {/* Footer meta — surface useful build info instead of setup
+              instructions. Operators can hit /api/health for the same data
+              programmatically. */}
+          <div className="mt-5 flex items-center justify-center gap-2 text-[10px] font-medium uppercase tracking-[0.18em] text-[var(--ink-3)]">
+            <span className="h-1 w-1 rounded-full bg-[var(--success)]" />
+            <span>Live streaming</span>
+            <span className="text-[var(--ink-3)]/50">·</span>
+            <span>9Router</span>
+            <span className="text-[var(--ink-3)]/50">·</span>
+            <span>v1</span>
           </div>
         </div>
       </div>
