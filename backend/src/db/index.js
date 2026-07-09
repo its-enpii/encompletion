@@ -220,17 +220,21 @@ function migrate() {
   // the previous hardcoded UI list so existing chats still resolve a label.
   const count = db.prepare('SELECT COUNT(*) AS n FROM models').get().n;
   // Seed defaults once. Only inserts when the table is completely empty —
-  // never overwrites whatever the admin has configured. Generic placeholders
-  // so the operator picks real values from /models without seeing the UI
-  // pre-populated with vendor-specific names. Operators can rename labels
-  // and keys at any time via the admin page.
+  // never overwrites whatever the admin has configured.
+  //
+  // Why these specific keys: they are the IDs the engine's CLI accepts
+  // out of the box. Generic names like 'standard' / 'fast' are NOT valid
+  // upstream model ids and would cause every prompt to come back with
+  // "issue with the selected model" — the user sees zero text and
+  // thinks the app is broken. Keep keys aligned with what the CLI
+  // understands; let admins rename the *label* freely in /models.
   if (count === 0) {
     const seed = db.prepare(
       `INSERT INTO models (key, label, enabled, sort_order) VALUES (?, ?, 1, ?)`
     );
     seed.run('workspace', 'Workspace', 0);
-    seed.run('standard', 'Standard', 10);
-    seed.run('fast', 'Fast', 20);
+    seed.run('claude-sonnet-4-6', 'Sonnet 4.6', 10);
+    seed.run('claude-haiku-4-5', 'Haiku 4.5', 20);
   }
 }
 

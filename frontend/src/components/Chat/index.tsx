@@ -383,14 +383,16 @@ export default function Chat({
       .map((m) => ({ value: m.key, label: m.label }));
     if (fromRegistry.length > 0) return fromRegistry;
     // Last-resort fallback when the registry endpoint is unreachable AND
-    // not loading. Generic labels — operators configure real options via
-    // /models. Avoid leaking upstream model names here on purpose.
+    // not loading. Keys here MUST be ids the engine CLI accepts; using
+    // a generic placeholder like 'standard' or 'fast' would cause every
+    // prompt to be rejected upstream with "issue with the selected
+    // model", which the user perceives as a stuck UI.
     return registryLoading
       ? [{ value: "workspace", label: "Workspace" }]
       : [
           { value: "workspace", label: "Workspace" },
-          { value: "standard", label: "Standard" },
-          { value: "fast", label: "Fast" },
+          { value: "claude-sonnet-4-6", label: "Sonnet 4.6" },
+          { value: "claude-haiku-4-5", label: "Haiku 4.5" },
         ];
   }, [registryModels, registryLoading]);
 

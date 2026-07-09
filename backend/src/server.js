@@ -365,6 +365,11 @@ io.on('connection', (socket) => {
           isError = !!evt.is_error;
           socket.emit('result', {
             isError,
+            // Surface the engine's error message when result.is_error so
+            // the UI can show "model X is not available" instead of just
+            // "request failed". Otherwise the operator has to dig into
+            // server logs to figure out why a session is empty.
+            errorMessage: isError ? (evt.result || evt.error || 'engine returned is_error=true') : undefined,
             cost: costUsd,
             durationMs,
             inputTokens: usage?.input_tokens || 0,
