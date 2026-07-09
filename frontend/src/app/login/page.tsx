@@ -172,22 +172,20 @@ export default function LoginPage() {
             </form>
           </Card>
 
-          {/* Defaults footer */}
+          {/* Configured via backend env vars on first boot. We intentionally
+              do not display any default username/password here — the obvious
+              hint would invite drive-by logins. Operators set credentials via
+              BOOTSTRAP_USERNAME / BOOTSTRAP_PASSWORD (or by manually inserting
+              a user) before exposing the app. */}
           <div className="mt-5 rounded-[var(--r-md)] border border-dashed border-[var(--line)] bg-[var(--paper-2)]/50 p-3 text-xs text-[var(--ink-3)]">
-            <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--ink-3)]">
-              <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <div className="flex items-center gap-1.5">
+              <svg viewBox="0 0 24 24" className="h-3 w-3 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10" />
                 <line x1="12" y1="16" x2="12" y2="12" />
                 <line x1="12" y1="8" x2="12.01" y2="8" />
               </svg>
-              <span>Default credentials</span>
+              <span>First time? Lihat <code className="rounded bg-[var(--paper-3)] px-1 py-0.5 font-mono text-[var(--ink-2)]">backend/.env.example</code> untuk setup akun pertama.</span>
             </div>
-            <div className="flex items-center gap-2">
-              <code className="rounded bg-[var(--paper-3)] px-2 py-0.5 font-mono text-[var(--ink-2)] ring-1 ring-[var(--line)]">admin</code>
-              <span className="text-[var(--ink-3)]">/</span>
-              <code className="rounded bg-[var(--paper-3)] px-2 py-0.5 font-mono text-[var(--ink-2)] ring-1 ring-[var(--line)]">admin12345</code>
-            </div>
-            <div className="mt-2">Ubah di <code className="rounded bg-[var(--paper-3)] px-1 py-0.5 font-mono text-[var(--ink-2)]">backend/.env</code></div>
           </div>
         </div>
       </div>
