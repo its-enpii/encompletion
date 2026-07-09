@@ -30,6 +30,12 @@ export function CenteredDialog({
 }: CenteredDialogProps) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
+  // Stable ref to onClose so ESC and the body-scroll lock don't tear down
+  // every parent re-render — that was the cause of focus-jumping-to-key
+  // bugs in mobile keyboards. We always read the latest onClose from the
+  // ref at call time, so behaviour tracks props without re-binding.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
 
   useEffect(() => {
     if (!open) return;
@@ -40,12 +46,20 @@ export function CenteredDialog({
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
         e.preventDefault();
-        onClose();
+        onCloseRef.current();
       }
     }
     document.addEventListener("keydown", onKey);
 
+    // Only autofocus the first field on the *initial* open transition. If
+    // the parent re-renders (form value typing → setState), this effect's
+    // deps don't change, so we don't yank focus back to the first input
+    // on every keystroke — which is exactly the bug on mobile keyboards
+    // where typing in the Label field kept snapping focus back to Key.
+    let didFocus = false;
     const t = setTimeout(() => {
+      if (didFocus) return;
+      didFocus = true;
       const el = dialogRef.current?.querySelector<HTMLElement>(
         "input, textarea, select, button, [tabindex]:not([tabindex='-1'])"
       );
@@ -58,7 +72,7 @@ export function CenteredDialog({
       clearTimeout(t);
       previouslyFocused.current?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   const [portalNode, setPortalNode] = useState<HTMLElement | null>(null);
   useEffect(() => { setPortalNode(document.body); }, []);
