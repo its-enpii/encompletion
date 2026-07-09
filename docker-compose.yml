@@ -49,12 +49,24 @@ services:
     depends_on:
       - backend
       - frontend
+    # Join both: claude-net for internal upstream traffic (backend, frontend);
+    # web-network for Nginx Proxy Manager on the production host.
     networks:
       - claude-net
+      - web-network
 
 networks:
   claude-net:
     driver: bridge
+  # External network shared with Nginx Proxy Manager on the production
+  # host. Declared `external: true` because the proxy stack creates and
+  # owns it — recomposing this file must never recreate it (NPM would
+  # lose its endpoint bindings). If the network doesn't exist on the
+  # target host, create it once with:
+  #   docker network create web-network
+  # before running `docker compose up -d`.
+  web-network:
+    external: true
 
 volumes:
   backend-data:
