@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
@@ -11,6 +11,19 @@ import { BrandMark } from "@/components/ui/BrandMark";
 export default function LoginPage() {
   const { login } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // AuthGate sends unauthenticated users here with `?next=/some/path`.
+  // After a successful login we bounce them back to where they were
+  // heading instead of always landing on the home page. The fallback
+  // stays "/" so a manual visit to /login still works.
+  const nextPath = (() => {
+    const n = searchParams?.get("next");
+    if (!n) return "/";
+    // Defence against open-redirect: only allow same-origin, leading "/",
+    // no scheme or host. Anything else falls back to home.
+    if (!n.startsWith("/") || n.startsWith("//")) return "/";
+    return n;
+  })();
   // Empty by default — we used to prefill 'admin' here as a UX shortcut, but
   // that advertises the seed admin role to anyone who opens /login. The
   // field's placeholder still nudges users toward a username format.
@@ -25,7 +38,7 @@ export default function LoginPage() {
     setLoading(true);
     const ok = await login(username, password);
     setLoading(false);
-    if (ok) router.push("/");
+    if (ok) router.push(nextPath);
     else setErr("Username atau password salah");
   }
 

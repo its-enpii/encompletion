@@ -7,6 +7,20 @@ import { getStored, setStored, clearStored } from "./store";
 // legacy "claude-web-token" value forward on first read.
 const TOKEN_NAME = "token";
 
+// Track the current pathname so `authFetch` only triggers an auth-driven
+// redirect when the user is hitting a route that actually requires auth.
+// We also defer the redirect by one tick so we never call
+// `router.push` during the render of a child component.
+let currentPathname = "/";
+function notifyOnUnauthorized() {
+  if (typeof window === "undefined") return;
+  if (window.location.pathname === "/login") return;
+  // Use replace instead of push so the back button doesn't trap the
+  // user in a logout↔login loop if their last interaction was a click
+  // on a dead token.
+  window.location.replace(`/login?next=${encodeURIComponent(window.location.pathname)}`);
+}
+
 export function getToken(): string | null {
   return getStored(TOKEN_NAME);
 }
@@ -16,6 +30,10 @@ export function setToken(token: string | null) {
   else clearStored(TOKEN_NAME);
 }
 
+export function setCurrentPathname(p: string) {
+  currentPathname = p || "/";
+}
+
 export function authFetch(input: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
   const t = getToken();
@@ -23,7 +41,19 @@ export function authFetch(input: string, init: RequestInit = {}) {
   if (init.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  return fetch(input, { ...init, headers });
+  return fetch(input, { ...init, headers }).then(async (res) => {
+    // 401 = backend says "your token is bad". Clear it and bounce to
+    // /login so the user re-authenticates instead of seeing cryptic
+    // JSON errors. Skip when we're already on /login to avoid an
+    // infinite replace loop on the form's own submit failures.
+    if (res.status === 401 && currentPathname !== "/login") {
+      setToken(null);
+      notifyOnUnauthorized();
+      // Throw a typed error so callers' `.catch` blocks can branch.
+      throw new Error("unauthorized");
+    }
+    return res;
+  });
 }
 
 export type AuthUser = {

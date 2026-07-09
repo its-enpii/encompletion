@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { useAuth } from "@/lib/auth";
+import { setCurrentPathname, useAuth } from "@/lib/auth";
 import { BrandMark } from "@/components/ui/BrandMark";
 
 export default function AuthGate({ children }: { children: React.ReactNode }) {
@@ -10,10 +10,21 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
 
+  // Keep the auth helper's pathname cache fresh — authFetch reads this
+  // to decide whether a 401 should bounce to /login or be ignored (we
+  // don't want to loop on the login form's own submit failure).
+  useEffect(() => {
+    setCurrentPathname(pathname || "/");
+  }, [pathname]);
+
   useEffect(() => {
     if (loading) return;
     if (!user && pathname !== "/login") {
-      router.push("/login");
+      // Preserve where the user was heading so /login can return them
+      // after success. Encoding the full path with search is safe — both
+      // usePathname and the query parser handle arbitrary URLs.
+      const next = pathname && pathname !== "/" ? `?next=${encodeURIComponent(pathname)}` : "";
+      router.push(`/login${next}`);
     } else if (user && pathname === "/login") {
       router.push("/");
     }

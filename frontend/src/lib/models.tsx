@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from "react";
+import { authFetch } from "./auth";
 
 export type Model = {
   id: number;
@@ -34,9 +35,9 @@ const ModelsContext = createContext<ModelsCtx>({
  * consumer refreshes — keeps multiple tabs in sync without a refetch on
  * every render.
  *
- * The hook does NOT fetch the admin-only `?all=1` payload — pages that
- * need disabled rows fetch their own. This keeps the dropdown's network
- * request free of data members shouldn't see.
+ * Uses authFetch so a 401 (e.g. hitting /models before login or after a
+ * token expiry) routes the user back to /login via the standard auth
+ * flow instead of bubbling JSON errors into the UI.
  */
 export function ModelsProvider({ children }: { children: ReactNode }) {
   const [models, setModels] = useState<Model[]>([]);
@@ -44,22 +45,13 @@ export function ModelsProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
-      const r = await fetch("/api/models", {
-        headers: (() => {
-          const h = new Headers();
-          if (typeof window !== "undefined") {
-            const t = window.localStorage.getItem("app:token")
-              || window.localStorage.getItem("claude-web-token");
-            if (t) h.set("Authorization", `Bearer ${t}`);
-          }
-          return h;
-        })(),
-      });
+      const r = await authFetch("/api/models");
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       setModels(Array.isArray(data) ? data : []);
     } catch {
       // silent: dropdown shouldn't break chat on registry fetch failure
+      // (authFetch already bounces 401 to /login, no need to log here)
     } finally {
       setLoading(false);
     }
