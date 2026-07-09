@@ -11,7 +11,10 @@ import { BrandMark } from "@/components/ui/BrandMark";
 export default function LoginPage() {
   const { login } = useAuth();
   const router = useRouter();
-  const [username, setUsername] = useState("admin");
+  // Empty by default — we used to prefill 'admin' here as a UX shortcut, but
+  // that advertises the seed admin role to anyone who opens /login. The
+  // field's placeholder still nudges users toward a username format.
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
