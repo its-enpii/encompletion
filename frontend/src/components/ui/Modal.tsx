@@ -68,6 +68,15 @@ export function CenteredDialog({
   return createPortal(
     <div
       className="anim-fade-in fixed inset-0 z-[200] flex items-center justify-center bg-[#1A1410]/40 p-4 backdrop-blur-sm"
+      // Close on backdrop click. Use `pointerdown` so we catch both mouse
+      // and touch, and use capture phase so we run before anything inside
+      // the dialog can stop propagation. Compare against currentTarget —
+      // not target — because a child element swallows the event target,
+      // but `currentTarget` is always the element we attached the
+      // handler to (the backdrop).
+      onPointerDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}

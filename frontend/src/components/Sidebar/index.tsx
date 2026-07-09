@@ -359,7 +359,13 @@ export default function Sidebar({
                   type="text"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  onFocus={() => setSearchDialogOpen(true)}
+                  // Open the dialog on click instead of focus. The focused
+                  // reopen loop: ESC → onClose() → modal restores focus to
+                  // this very input → onFocus fires → setSearchDialogOpen(true)
+                  // → dialog reopens. Click is still reliable: users tap the
+                  // input to start a session-scoped filter, or hit the
+                  // magnifier button on the right for the full-text dialog.
+                  onClick={() => setSearchDialogOpen(true)}
                   placeholder="Cari di semua session…"
                   className="block w-full cursor-pointer rounded-[var(--r-md)] border border-[var(--line-dark)] bg-[var(--dark-2)] py-2 pl-9 pr-12 text-xs text-[var(--dark-text)] placeholder:text-[var(--dark-text-3)] transition-colors focus:border-[var(--magenta-400)] focus:bg-[var(--dark-3)] focus:outline-none focus:ring-2 focus:ring-[var(--magenta-500)]/30"
                 />
