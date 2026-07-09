@@ -6,7 +6,7 @@ const { chromium } = require('playwright');
   const page = await context.newPage();
 
   // Login first
-  await page.goto('http://localhost:8008/login', { waitUntil: 'domcontentloaded' });
+  await page.goto('http://localhost:8010/login', { waitUntil: 'domcontentloaded' });
   await page.waitForLoadState('networkidle');
   await page.screenshot({ path: 'F:/Workspace/Enpii Studio/projects/encompletion/snap-login.png' });
 

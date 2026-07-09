@@ -6,7 +6,7 @@ Web GUI untuk Claude Code CLI yang terhubung ke 9Router (ai.enpiistudio.com).
 
 - Backend: Node.js + Express + Socket.IO + SQLite (better-sqlite3)
 - Frontend: Next.js 16 (App Router) + Socket.IO client + Tailwind v4
-- Proxy: Nginx (expose port **8008** & **8082**)
+- Proxy: Nginx (expose port **8010** & **8082**)
 - Engine: Claude Code CLI (di-install di dalam container backend)
 
 ## Cara Jalankan
@@ -20,7 +20,7 @@ Web GUI untuk Claude Code CLI yang terhubung ke 9Router (ai.enpiistudio.com).
 docker compose up -d --build
 
 # 3. Buka browser
-# http://localhost:8008  atau  http://localhost:8082
+# http://localhost:8010  atau  http://localhost:8082
 ```
 
 ## Struktur
