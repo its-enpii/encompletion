@@ -31,7 +31,18 @@ type Props = {
   onSubmit: (payload: ModelPayload) => Promise<void>;
 };
 
-const KEY_RE = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/;
+// Permissive model key. Admin-only field — the operator knows what shape
+// their CLI expects and what historical sessions reference. We don't
+// rewrite user input; we only block patterns that break shell parsing or
+// the registration protocol:
+//   - empty string
+//   - leading or trailing whitespace
+//
+// Anything else — dots, slashes, colons, backslashes, dashes, underscores,
+// provider/model paths, the lot — is left to the operator to author. If
+// the CLI rejects the key down the line, that's a runtime problem
+// (caught at prompt time) not a registration problem.
+const KEY_RE = /^\S+$/;
 
 export function ModelDialog({ value, onClose, onSubmit }: Props) {
   const isEdit = !!value && value.kind === "edit";
@@ -60,11 +71,17 @@ export function ModelDialog({ value, onClose, onSubmit }: Props) {
 
   if (!value) return null;
 
+  function validateKey(raw: string): string | null {
+    if (!raw || !raw.trim()) return "Key wajib diisi";
+    if (/\s/.test(raw)) return "Key tidak boleh mengandung spasi atau baris baru";
+    return null;
+  }
+
   async function save() {
     setError(null);
-    if (!isEdit && !KEY_RE.test(key)) {
-      setError("Key harus lowercase kebab-case, mis. claude-sonnet-4-6");
-      return;
+    if (!isEdit) {
+      const err = validateKey(key);
+      if (err) { setError(err); return; }
     }
     if (!label.trim()) {
       setError("Label wajib diisi");
@@ -72,7 +89,7 @@ export function ModelDialog({ value, onClose, onSubmit }: Props) {
     }
     const payload: ModelPayload = { label: label.trim() };
     if (!isEdit) {
-      payload.key = key.trim().toLowerCase();
+      payload.key = key.trim();
       payload.enabled = enabled;
       payload.sort_order = sortOrder;
     } else {
@@ -96,7 +113,7 @@ export function ModelDialog({ value, onClose, onSubmit }: Props) {
       open
       onClose={() => { if (!busy) onClose(); }}
       title={isEdit ? `Edit model: ${(value as any).model.label}` : "Tambah model"}
-      description="Key dikirim ke backend engine via CLI flag. Label tampil di dropdown."
+      description="Key dikirim ke backend engine via CLI flag. Bebas karakter apapun selama non-kosong dan tanpa spasi."
       widthClass="max-w-md"
       footer={
         <>
@@ -114,10 +131,10 @@ export function ModelDialog({ value, onClose, onSubmit }: Props) {
           <TextField
             label="Key (CLI flag)"
             value={key}
-            onChange={(e) => setKey(e.target.value.trim().toLowerCase())}
-            placeholder="workspace"
+            onChange={(e) => setKey(e.target.value)}
+            placeholder="workspace atau provider/model-name"
             autoFocus
-            hint="lowercase kebab-case, contoh: opus-4-8 atau workspace"
+            hint="Karakter apapun kecuali spasi. Contoh: provider/model-name atau custom.id"
           />
         )}
         <TextField

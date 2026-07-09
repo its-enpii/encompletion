@@ -25,13 +25,22 @@ function broadcast(io) {
 // GET is open to any authenticated user (their dropdown reads it).
 // Mutations are admin-only.
 
-// Validate the model key. Same constraints as Claude CLI model ids:
-// lowercase kebab-case (letters, digits, hyphens). 1-64 chars. No leading/
-// trailing hyphens.
+// Validate the model key. The key is what we pass verbatim to the CLI
+// (e.g. `--model <key>`), and it is persisted into historical session
+// rows — so we don't auto-rewrite user input. The field is admin-only,
+// so the operator knows what shape their engine expects. We only block
+// patterns that would break shell parsing or the registration:
+//   - empty (after trim)
+//   - any internal whitespace or newlines
+//
+// Otherwise: dots, slashes, colons, backslashes, dashes, underscores, even
+// quote chars are left to the operator. Server-side check mirrors the
+// frontend so the same key is accepted everywhere.
 function normalizeKey(raw) {
   if (typeof raw !== 'string') return null;
-  const k = raw.trim().toLowerCase();
-  if (!/^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/.test(k)) return null;
+  const k = raw.trim();
+  if (!k) return null;
+  if (/\s/.test(k)) return null;
   return k;
 }
 
