@@ -272,15 +272,15 @@ export default function Chat({
     setStreaming(true);
     setLastTickAt(Date.now());
     setStale(false);
+    let newSessionId: number | null = null;
     try {
       const r = await authFetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          message: text,
-          project_id: projectId,
+          title: text.slice(0, 80),
           model,
-          effort,
+          project_id: projectId,
           attachments: pendingAtts.map((a) => ({ file_name: a.file_name, mime_type: a.mime_type, size: a.size, content: a.content, file_path: a.file_path })),
         }),
       });
@@ -290,13 +290,41 @@ export default function Chat({
         throw new Error(d.error || `HTTP ${r.status}`);
       }
       const data = await r.json();
-      const newId = data.session_id ?? data.id;
-      if (!sessionId && newId) {
-        router.push(`/chat/${newId}`);
+      newSessionId = data.id ?? data.session_id;
+      if (!sessionId && newSessionId) {
+        // Navigate before emitting so the chat effect's [sessionId]
+        // listener is registered against the new session id by the time
+        // the server starts emitting `start` / `text` / `result` events.
+        router.push(`/chat/${newSessionId}`);
       }
       setSidebarRefresh((s) => s + 1);
     } catch (e: any) {
       setError(e?.message || "Gagal kirim");
+      setStreaming(false);
+      return;
+    }
+
+    // Always emit the prompt over the socket for BOTH new sessions and
+    // existing ones — POST /api/sessions only persists the row, the
+    // actual Claude invocation flows through this `prompt` event. The
+    // previous version of this function created the row but never
+    // emitted, which left the UI stuck in streaming with no provider
+    // request landing on the server.
+    try {
+      const socket = getSocket();
+      socket.emit(
+        "prompt",
+        {
+          prompt: text,
+          model,
+          sessionId: newSessionId ?? sessionId,
+          projectId,
+          effort,
+        },
+        () => {}
+      );
+    } catch (e: any) {
+      setError(e?.message || "Gagal kirim lewat socket");
       setStreaming(false);
     }
   }
@@ -440,6 +468,15 @@ export default function Chat({
         onChangeEffort={setEffort}
         modelOptions={modelOptions}
       />
+
+      {error && (
+        // Surface silent failures (load, send, socket) at the top of the
+        // thread so they are not lost in a blank "new chat" look. The
+        // banner stays until the next successful send/load.
+        <div className="border-b border-[var(--danger)]/30 bg-[var(--danger-50)] px-4 py-2 text-[12px] text-[var(--danger)]">
+          <span className="font-semibold">Error:</span> {error}
+        </div>
+      )}
 
       <MessageList
         messages={messages}
