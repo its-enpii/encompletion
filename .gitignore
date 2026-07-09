@@ -1,0 +1,13 @@
+node_modules/
+.next/
+data/
+storage/
+*.db
+*.log
+.env
+.DS_Store
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+build.log
+.cache/
+*.tsbuildinfo
