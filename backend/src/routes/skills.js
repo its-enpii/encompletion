@@ -94,6 +94,90 @@ router.get('/:name', (req, res) => {
   }
 });
 
+// Create a skill directly from a single upload (zip / single text file).
+// Body: { dataBase64: string, fileName: string }.
+//
+// Resolution:
+//   - zip -> extract to <root>/<derivedName>/. Skill name from the zip's
+//     basename minus extension, sanitised; collisions rejected 409.
+//   - .md / .markdown / .txt -> write as SKILL.md inside a new
+//     <root>/<derivedName>/ folder. Skill name from the filename
+//     basename minus the extension.
+//   - rar4/rar5 / other -> 415 with a suggestion to re-pack.
+//
+// The endpoint exists so a one-shot drop of a downloaded skill
+// bundle is enough to create a new skill — the editor flow is for
+// refining an existing one, not the only path in.
+router.post('/from-upload', async (req, res) => {
+  const { dataBase64, fileName } = req.body || {};
+  if (typeof dataBase64 !== 'string')
+    return res.status(400).json({ error: 'dataBase64 required' });
+  if (typeof fileName !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(fileName))
+    return res.status(400).json({ error: 'invalid file name' });
+
+  let skillName = '';
+  try {
+    const safe = require('path').basename(fileName, require('path').extname(fileName));
+    const cleaned = safeName(safe);
+    if (!cleaned) return res.status(400).json({ error: 'cannot derive a skill name from this filename' });
+    skillName = cleaned;
+
+    ensureRoot();
+    const target = skillDir(skillName);
+    if (fs.existsSync(target))
+      return res.status(409).json({ error: 'skill already exists', name: skillName });
+
+    const buf = Buffer.from(dataBase64, 'base64');
+    const kind = detectArchiveKindFromBuf(buf);
+
+    if (kind === 'zip') {
+      const tmp = require('path').join(require('os').tmpdir(), `skillnew-${Date.now()}-${Math.random().toString(36).slice(2)}.zip`);
+      fs.writeFileSync(tmp, buf);
+      try {
+        const written = await extractZip(tmp, target);
+        // Make sure the extracted archive actually contains a SKILL.md;
+        // without one we don't have a usable skill.
+        if (!fs.existsSync(skillFile(skillName))) {
+          // If SKILL.md landed at a sub-path inside the archive, fall
+          // back to the first .md file we can find.
+          const found = written.find((p) => p.toLowerCase().endsWith('.md') && !p.toLowerCase().endsWith('skill.md') && !p.toLowerCase().includes('node_modules'));
+          if (found) {
+            fs.copyFileSync(require('path').join(target, found), skillFile(skillName));
+          } else {
+            throw new Error('archive contains no SKILL.md');
+          }
+        }
+      } finally {
+        try { fs.unlinkSync(tmp); } catch {}
+      }
+    } else if (kind === 'rar4' || kind === 'rar5') {
+      return res.status(415).json({ error: 'rar not supported — please re-pack as zip', kind });
+    } else {
+      // Plain text file. SKILL.md is the canonical entrypoint that
+      // skill_loader.js reads, so always treat the uploaded text as
+      // SKILL.md content regardless of the file's actual extension
+      // (we accept .md / .markdown / .txt as a courtesy).
+      const ext = require('path').extname(fileName).toLowerCase();
+      if (!['.md', '.markdown', '.txt', ''].includes(ext)) {
+        return res.status(400).json({ error: 'unsupported file type — upload .md / .zip' });
+      }
+      fs.mkdirSync(target, { recursive: true });
+      fs.writeFileSync(skillFile(skillName), buf);
+    }
+
+    // Bootstrap the skill with a sane frontmatter if the extracted
+    // file has none — the LLM runner depends on it for description.
+    const md = fs.readFileSync(skillFile(skillName), 'utf8');
+    if (!/^---\r?\n[\s\S]*?\r?\n---/.test(md)) {
+      const fm = `---\ndescription: ${skillName}\n---\n\n`;
+      fs.writeFileSync(skillFile(skillName), fm + md);
+    }
+    res.json({ ok: true, name: skillName });
+  } catch (e) {
+    res.status(500).json({ error: e?.message || 'upload-create failed', name: skillName });
+  }
+});
+
 // Create a new skill. Body: { name, content, files?: [{name, content}] }.
 // We always overwrite SKILL.md (the canonical entrypoint). Supporting files
 // are written only if explicitly listed — `content` field is base64 for binary

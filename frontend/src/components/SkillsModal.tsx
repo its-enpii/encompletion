@@ -157,6 +157,39 @@ export default function SkillsModal({ onClose }: Props) {
     }
   }
 
+  // Upload-create: single file -> POST /api/skills/from-upload ->
+  // server derives the name, extracts/writes content, and we open the
+  // editor on the freshly created skill.
+  async function uploadNewSkill(file: File) {
+    setBusy(true);
+    setError(null);
+    try {
+      const buf = await file.arrayBuffer();
+      const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+      const r = await authFetch("/api/skills/from-upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataBase64: b64, fileName: file.name }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d.error || `HTTP ${r.status}`);
+      }
+      const data = await r.json();
+      if (!data?.name) throw new Error("server did not return a name");
+      await load();
+      // Open the editor on the new skill so the operator can review
+      // and refine SKILL.md immediately.
+      const fresh = await authFetch("/api/skills").then((rr) => rr.json());
+      const skill = fresh.skills?.find((s: Skill) => s.name === data.name);
+      if (skill) startEdit(skill);
+    } catch (e: any) {
+      setError(e?.message || "upload-create failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function deleteFile(name: string) {
     if (!editing) return;
     const ok = await confirm({
@@ -333,6 +366,33 @@ export default function SkillsModal({ onClose }: Props) {
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>Tutup</Button>
+          {/* Upload creates a new skill directly from a single file:
+              zip -> extracts into a folder named after the zip, plain
+              .md/.txt -> becomes that skill's SKILL.md. Faster than
+              creating-then-uploading for fresh imports. */}
+          <label
+            className={`inline-flex cursor-pointer items-center gap-1.5 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-2)] px-3 py-2 text-[13px] font-medium text-[var(--ink-2)] transition-colors hover:border-[var(--magenta)]/40 hover:text-[var(--ink)] ${
+              busy ? "pointer-events-none opacity-50" : ""
+            }`}
+          >
+            <input
+              type="file"
+              hidden
+              accept=".zip,.md,.markdown,.txt"
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                e.currentTarget.value = "";
+                if (!f) return;
+                await uploadNewSkill(f);
+              }}
+            />
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            <span>Upload skill</span>
+          </label>
           <Button variant="primary" onClick={startCreate}>
             <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
               <line x1="12" y1="5" x2="12" y2="19" />
@@ -361,35 +421,50 @@ export default function SkillsModal({ onClose }: Props) {
           <div className="mt-1 text-xs text-[var(--ink-3)]">Tambah skill pertamamu untuk mulai.</div>
         </div>
       ) : (
-        <ul className="flex flex-col gap-2">
-          {skills.map((s) => (
-            <li
-              key={s.name}
-              className="flex items-center justify-between gap-3 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-3)] p-3 transition-colors hover:border-[var(--line-strong)]"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <Pill tone="saffron">{s.name}</Pill>
-                  <span className="text-xs text-[var(--ink-3)]">
-                    {new Date(s.updated_at).toLocaleString("id-ID")}
-                  </span>
+        <>
+          {/* Drop zone for the list view — accepts a single archive
+              or text file and routes to the upload-create flow. */}
+          <div
+            onDragOver={(e) => { e.preventDefault(); }}
+            onDrop={async (e) => {
+              e.preventDefault();
+              const f = e.dataTransfer.files?.[0];
+              if (f) await uploadNewSkill(f);
+            }}
+            className="mb-3 rounded-[var(--r-md)] border border-dashed border-[var(--line)] bg-[var(--paper-2)]/40 px-3 py-3 text-center text-[11px] text-[var(--ink-3)] transition-colors hover:border-[var(--magenta)]/40 hover:text-[var(--ink-2)]"
+          >
+            Drop file .zip atau .md di sini untuk buat skill baru
+          </div>
+          <ul className="flex flex-col gap-2">
+            {skills.map((s) => (
+              <li
+                key={s.name}
+                className="flex items-center justify-between gap-3 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-3)] p-3 transition-colors hover:border-[var(--line-strong)]"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <Pill tone="saffron">{s.name}</Pill>
+                    <span className="text-xs text-[var(--ink-3)]">
+                      {new Date(s.updated_at).toLocaleString("id-ID")}
+                    </span>
+                  </div>
+                  {s.description && (
+                    <p className="mt-1.5 line-clamp-2 text-sm text-[var(--ink-2)]">{s.description}</p>
+                  )}
+                  <p className="mt-1 text-xs text-[var(--ink-3)]">
+                    {(s.size / 1024).toFixed(1)} KB · {s.files.length} file
+                  </p>
                 </div>
-                {s.description && (
-                  <p className="mt-1.5 line-clamp-2 text-sm text-[var(--ink-2)]">{s.description}</p>
-                )}
-                <p className="mt-1 text-xs text-[var(--ink-3)]">
-                  {(s.size / 1024).toFixed(1)} KB · {s.files.length} file
-                </p>
-              </div>
-              <div className="flex shrink-0 gap-1">
-                <Button variant="ghost" size="sm" onClick={() => startEdit(s)}>Edit</Button>
-                <Button variant="ghost" size="sm" onClick={() => remove(s.name)} disabled={busy}>
-                  <span className="text-[var(--danger)]">Hapus</span>
-                </Button>
-              </div>
-            </li>
-          ))}
-        </ul>
+                <div className="flex shrink-0 gap-1">
+                  <Button variant="ghost" size="sm" onClick={() => startEdit(s)}>Edit</Button>
+                  <Button variant="ghost" size="sm" onClick={() => remove(s.name)} disabled={busy}>
+                    <span className="text-[var(--danger)]">Hapus</span>
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </CenteredDialog>
   );
