@@ -196,7 +196,7 @@ io.on('connection', (socket) => {
       );
     }
     // Notify client of saved attachments (for UI thumbnails)
-    socket.emit('attachments_saved', { messageId: userMsgId, count: attachments.length });
+    socket.emit('attachments_saved', { sessionId: dbSession.id, messageId: userMsgId, count: attachments.length });
 
     // Build the final prompt with system context + attachments
     let prefix = '';
@@ -315,7 +315,7 @@ io.on('connection', (socket) => {
           for (const block of blocks) {
             if (block.type === 'text' && block.text) {
               assistantFullText += block.text;
-              socket.emit('text', { text: block.text });
+              socket.emit('text', { sessionId: dbSession.id, text: block.text });
             } else if (block.type === 'tool_use') {
               toolStartedAt.set(block.id, Date.now());
               pendingToolUses.set(block.id, {
@@ -323,6 +323,7 @@ io.on('connection', (socket) => {
                 input: block.input,
               });
               socket.emit('tool_use', {
+                sessionId: dbSession.id,
                 tool_use_id: block.id,
                 tool_name: block.name,
                 input: block.input,
@@ -352,6 +353,7 @@ io.on('connection', (socket) => {
               pendingToolUses.delete(id);
               toolStartedAt.delete(id);
               socket.emit('tool_result', {
+                sessionId: dbSession.id,
                 tool_use_id: id,
                 content: block.content,
                 is_error: !!block.is_error,
@@ -378,9 +380,9 @@ io.on('connection', (socket) => {
             claudeSessionId: cliSessionId,
           });
         } else if (evt.type === 'error') {
-          socket.emit('error', { message: evt.message });
+          socket.emit('error', { sessionId: dbSession.id, message: evt.message });
         } else if (evt.type === 'stderr') {
-          socket.emit('stderr', { text: evt.text });
+          socket.emit('stderr', { sessionId: dbSession.id, text: evt.text });
         }
       }
     );

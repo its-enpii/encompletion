@@ -70,7 +70,13 @@ export function SessionRow({
       onMouseLeave={() => setHovered(false)}
     >
       <div
-        className={`group relative rounded-[var(--r-sm)] transition-all duration-150 ${
+        className={`group relative rounded-[var(--r-sm)] ${
+          // Active row swap used transition-all duration-150; in practice
+          // it produced a perceivable "blink" across the whole list every
+          // time the operator selected a session because every row's
+          // wrapper re-applied its transition. Drop the transition so
+          // state changes are instant — the active gradient itself is
+          // already a strong enough affordance.
           active
             ? "bg-gradient-to-r from-[var(--magenta-700)]/20 via-[var(--magenta-700)]/15 to-transparent text-[var(--dark-text)] shadow-[inset_2px_0_0_var(--saffron-300),inset_0_0_0_1px_var(--magenta-700)]/40"
             : "text-[var(--dark-text-2)] hover:bg-[var(--dark-2)] hover:text-[var(--dark-text)]"
@@ -101,11 +107,12 @@ export function SessionRow({
             {s.starred ? "★" : "#"}
             {active && (
               <>
-                {/* Pulse ring — pure CSS, runs whenever this row is active */}
-                <span
-                  aria-hidden
-                  className="pointer-events-none absolute inset-0 rounded-[var(--r-sm)] ring-2 ring-[var(--saffron-300)]/70 animate-ping"
-                />
+                {/* Static ring around the active session's avatar —
+                    the original implementation used animate-ping (a
+                    ping-out ring) which produced a visible "blink"
+                    whenever the active row changed. A subtle pulsing
+                    background is enough to mark the row without a
+                    jarring expansion animation. */}
                 <span
                   aria-hidden
                   className="pointer-events-none absolute inset-0 rounded-[var(--r-sm)] ring-2 ring-[var(--saffron-300)]"
