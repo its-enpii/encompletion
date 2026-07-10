@@ -296,7 +296,18 @@ io.on('connection', (socket) => {
 
     // NOTE: We deliberately do NOT pass `--resume <claude_session_id>` here.
     // Conversation history is instead injected inline as a transcript (see above).
-    activeRunner = runClaude(
+    //
+    // Engine switch: LLM_ENGINE=llm (default) routes through the
+    // OpenAI-compatible HTTP runner. LLM_ENGINE=claude falls back to
+    // the original subprocess-based runner for safety during rollout.
+    // The model key stored on the session comes from /models; it's
+    // passed verbatim as the LLM `model` parameter, so registry edits
+    // show up immediately without code changes here.
+    const ENGINE = (process.env.LLM_ENGINE || "llm").toLowerCase();
+    const runner = ENGINE === "claude"
+      ? runClaude
+      : (await import("./llm-runner.js")).runLLM;
+    activeRunner = runner(
       finalPrompt,
       {
         model: dbSession.model,
