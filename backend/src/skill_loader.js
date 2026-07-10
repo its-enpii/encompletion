@@ -1,14 +1,18 @@
 /**
  * Skill loader for the LLM runner.
  *
- * Mirrors the Claude CLI convention of `~/.claude/skills/<name>/SKILL.md`
- * but instead of letting the CLI auto-inject skill content into the
- * prompt, we expose two tool calls (`Skill.list` + `Skill.read`) so
- * the model can discover the catalog and pull what it needs.
+ * Skill directory convention: `<root>/<name>/SKILL.md`. Default lives
+ * at `$HOME/.enllm/skills/` — engine-neutral, so it doesn't require
+ * any Claude CLI binary to be installed. Skills are exposed to the
+ * model via two tool calls (`Skill.list` + `Skill.read`) so the model
+ * can discover the catalog and pull only what it needs.
  *
- * That's slower than CLI auto-discovery (extra round-trip per skill
- * load) but explicit, audit-friendly, and the round-trip cost is
- * usually offset by a much smaller system prompt.
+ * Earlier iterations of this file reused the Claude CLI path
+ * (~/.claude/skills), which made the "engine-neutral" framing
+ * dishonest — we now own the directory and the loader is the only
+ * reader. Setup is cheaper than the CLI auto-discovery: each skill
+ * load is one tool round-trip, but the system prompt stays tiny
+ * because we don't eagerly inject every SKILL.md.
  *
  * Read paths are validated via `safeName` so a malicious name string
  * can never escape the skills root.
@@ -19,7 +23,7 @@ import path from "node:path";
 import os from "node:os";
 
 const SKILLS_ROOT =
-  process.env.CLAUDE_SKILLS_DIR || path.join(os.homedir(), ".claude", "skills");
+  process.env.ENLLM_SKILLS_DIR || path.join(os.homedir(), ".enllm", "skills");
 
 const SAFE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const MAX_SKILL_BYTES = 32 * 1024;

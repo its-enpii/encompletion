@@ -45,7 +45,7 @@ app.use('/api/users', requireAuth, usersRouter);
 app.use('/api/sessions', requireAuth, sessionsRouter);
 app.use('/api/projects', requireAuth, projectsRouter);
 app.use('/api/attachments', requireAuth, attachmentsRouter);
-// Skills live in the Claude CLI's own filesystem path ($HOME/.claude/skills/),
+// Skills live in the engine-neutral skills directory ($HOME/.enllm/skills/),
 // so they're global per-user, not per-session. Any logged-in user can manage.
 app.use('/api/skills', requireAuth, skillsRouter);
 app.use('/api/models', requireAuth, modelsRouter);

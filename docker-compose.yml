@@ -10,11 +10,11 @@ services:
     volumes:
       - backend-data:/app/data
       - backend-storage:/app/storage
-      # Persistent Claude Code skills directory. Claude CLI auto-discovers
-      # skills at $HOME/.claude/skills/, so we mount a named volume there to
-      # survive container restarts. Without this, any SKILL.md the user creates
-      # via the UI would be wiped on container recreate.
-      - claude-skills:/root/.claude/skills
+      # Persistent skills directory. The enllm runner loads SKILL.md from
+      # $HOME/.enllm/skills/<name>/SKILL.md (engine-neutral — does not
+      # require any vendor CLI to be installed). The named volume keeps
+      # skill edits across container recreations.
+      - enllm-skills:/root/.enllm/skills
     networks:
       - claude-net
     healthcheck:
@@ -71,4 +71,4 @@ networks:
 volumes:
   backend-data:
   backend-storage:
-  claude-skills:
+  enllm-skills:

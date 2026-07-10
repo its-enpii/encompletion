@@ -6,10 +6,13 @@ import { detectArchiveKind, extractZip, listSkillFiles } from '../skills-archive
 
 const router = express.Router();
 
-// Claude Code discovers skills at $HOME/.claude/skills/<name>/SKILL.md.
-// Allow override via env so tests / non-default installs can pin a path.
+// Skill directory convention: <root>/<name>/SKILL.md. Default lives at
+// $HOME/.enllm/skills/ so the branch is engine-neutral — earlier this
+// reused the Claude CLI path (.claude/skills) but enllm doesn't depend
+// on any CLI binary. ENLLM_SKILLS_DIR overrides for tests / external
+// installs.
 const SKILLS_ROOT =
-  process.env.CLAUDE_SKILLS_DIR || path.join(os.homedir(), '.claude', 'skills');
+  process.env.ENLLM_SKILLS_DIR || path.join(os.homedir(), '.enllm', 'skills');
 
 // Reject anything that tries to escape the root via ".." or absolute paths.
 function safeName(name) {
