@@ -23,11 +23,18 @@
 
 import { EventEmitter } from "node:events";
 import { runTool } from "./tools.js";
+import { skillTools, runSkillTool } from "./skill_loader.js";
 
 const SYSTEM_PROMPT = `You are a coding assistant. You have read/write
 access to a working directory via the provided tools. Prefer small,
 focused changes. Always read a file before editing it unless the user
 provided the full contents verbatim. Keep prose concise.
+
+You also have Skill.list and Skill.read tools. When a user request
+matches a skill's description, call Skill.list first to confirm the
+catalog, then Skill.read to load the full procedure before acting.
+This mirrors the same scoped-procedure workflow Claude Code skills
+provide, but invoked explicitly via tool calls.`;
 
 When you finish a turn, do NOT emit a closing "ask for next" — wait
 for the user's next message.`;
@@ -326,10 +333,16 @@ export function runLLM(prompt, opts = {}, onEvent) {
             continue;
           }
           onEvent({ type: "tool_use", id: tc.id, name: tc.name, input: args });
-          const r = await runTool(tc.name, args, {
-            cwd,
-            deadlineMs: args.deadline_ms || DEFAULT_TOOL_DEADLINE_MS,
-          });
+          // Skill.* tools don't take cwd or deadlines; the others do.
+          let r;
+          if (tc.name === "Skill.list" || tc.name === "Skill.read") {
+            r = await runSkillTool(tc.name, args);
+          } else {
+            r = await runTool(tc.name, args, {
+              cwd,
+              deadlineMs: args.deadline_ms || DEFAULT_TOOL_DEADLINE_MS,
+            });
+          }
           const content = r.error
             ? { error: r.error }
             : (r.text ?? "");
@@ -391,7 +404,7 @@ async function fetchChatCompletion({ model, messages }) {
     body: JSON.stringify({
       model,
       messages,
-      tools: TOOLS,
+      tools: [...TOOLS, ...skillTools],
       tool_choice: "auto",
       stream: true,
       temperature: 0.2,
