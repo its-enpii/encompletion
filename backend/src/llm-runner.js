@@ -198,6 +198,7 @@ export function runLLM(prompt, opts = {}, onEvent) {
         let sawAny = false;
 
         try {
+          let frameCount = 0;
           while (true) {
             if (aborted) break;
             const { value, done } = await reader.read();
@@ -208,22 +209,38 @@ export function runLLM(prompt, opts = {}, onEvent) {
             while ((idx = buf.indexOf("\n\n")) !== -1) {
               const frame = buf.slice(0, idx);
               buf = buf.slice(idx + 2);
+              frameCount++;
               for (const payload of parseSseFrame(frame)) {
                 if (payload === "[DONE]") continue;
                 let obj;
-                try { obj = JSON.parse(payload); } catch { continue; }
+                try { obj = JSON.parse(payload); } catch (e) {
+                  // Forward the raw payload to stderr so the operator
+                  // can see exactly what the upstream gateway sent
+                  // when no content makes it into the UI. Limit
+                  // length so a runaway log line doesn't blow up.
+                  onEvent({ type: "stderr", text: `non-JSON SSE frame #${frameCount}: ${payload.slice(0, 200)}\n` });
+                  continue;
+                }
                 const choice = obj?.choices?.[0];
                 const delta = choice?.delta;
+                // Two payloads are common in dev gateways: SSE
+                // frames and a non-stream JSON body when the
+                // gateway decides streaming isn't worth it. Handle
+                // the non-stream shape as a fallback so a single
+                // JSON object with `choices[0].message.content`
+                // becomes a text event too.
+                const fallbackContent = !delta && !Array.isArray(delta?.tool_calls)
+                  ? choice?.message?.content
+                  : null;
                 if (delta?.content) {
                   assistantTextThisRound += delta.content;
                   onEvent({ type: "text", text: delta.content });
+                } else if (fallbackContent) {
+                  assistantTextThisRound += fallbackContent;
+                  onEvent({ type: "text", text: fallbackContent });
                 }
                 if (Array.isArray(delta?.tool_calls)) {
                   for (const tc of delta.tool_calls) {
-                    // Each tool_call arrives as a sequence of deltas:
-                    // the first carries id+name, subsequent carry only
-                    // fragments of the arguments JSON. We accumulate
-                    // in place.
                     if (tc.id) {
                       let slot = toolCalls.find((t) => t.id === tc.id);
                       if (!slot) {
@@ -239,6 +256,23 @@ export function runLLM(prompt, opts = {}, onEvent) {
                 }
                 if (obj?.usage) usageThisRound = obj.usage;
               }
+            }
+            if (frameCount === 0 && buf.length > 256) {
+              // The body isn't using SSE framing at all — it's a
+              // single JSON object. Parse it as one and bail.
+              try {
+                const obj = JSON.parse(buf.trim());
+                const choice = obj?.choices?.[0];
+                const content = choice?.message?.content;
+                if (content) {
+                  assistantTextThisRound += content;
+                  onEvent({ type: "text", text: content });
+                  sawAny = true;
+                  // Cancel the read loop by jumping to the end.
+                  try { await reader.cancel(); } catch { /* ignore */ }
+                  break;
+                }
+              } catch { /* not JSON either */ }
             }
           }
         } finally {

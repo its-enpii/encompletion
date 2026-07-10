@@ -136,7 +136,7 @@ export default function Chat({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
 
-  async function loadSession(id: number) {
+  async function loadSession(id: number, currentStreaming = false) {
     try {
       // Backend exposes a single `/full` endpoint that bundles session +
       // messages + tool_uses + artifacts + attachments in one round-trip.
@@ -165,13 +165,23 @@ export default function Chat({
         ? projects.find((p) => p.id === s.project_id) ?? null
         : null;
       setActiveProject(projectFromSession);
-      setMessages(m);
       setToolUses(t);
       setArtifacts((a as Artifact[]).filter((x) => !x.dup_of));
       setAttachmentsByMsg(attMap);
       setError(null);
       setUsage(null);
       setInfo(null);
+      // Don't overwrite live-streamed messages with the persisted
+      // snapshot while we're mid-stream. The socket handlers append
+      // text deltas to the local state in real time; a hard reload
+      // from the DB during the turn would clobber any chunk that
+      // arrived since the snapshot was taken — the assistant bubble
+      // briefly vanishes then reappears, or never reappears at all
+      // if the response was short. Defer the DB snapshot until the
+      // turn settles.
+      if (!currentStreaming) {
+        setMessages(m);
+      }
       scrollToBottom();
     } catch (e: any) {
       setError(e?.message || "Gagal load session");
@@ -188,7 +198,7 @@ export default function Chat({
       setAttachmentsByMsg({});
       return;
     }
-    loadSession(sessionId);
+    loadSession(sessionId, streaming);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
