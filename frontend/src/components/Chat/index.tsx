@@ -82,6 +82,14 @@ export default function Chat({
   const [projects, setProjects] = useState<Project[]>([]);
   const [pendingAtts, setPendingAtts] = useState<PendingAtt[]>([]);
   const [showArtifactPanel, setShowArtifactPanelRaw] = useState(false);
+  // Keep a ref mirror of the latest messages list so the socket
+  // event handlers (registered once per sessionId) can check whether
+  // an assistant bubble has actually accumulated any content
+  // before flipping streaming=false. Without this, the 'result'
+  // event can race past the streaming 'text' deltas and the UI
+  // lands at 'loading hilang tapi balasan belum ada'.
+  const messagesRef = useRef<Msg[]>([]);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
   function setShowArtifactPanel(v: boolean) {
     setShowArtifactPanelRaw(v);
     setStored("artifacts:open", v ? "1" : "0");
@@ -281,9 +289,24 @@ export default function Chat({
       if (payload.isError) {
         setError(payload.errorMessage || "engine returned is_error=true");
       }
-      setStreaming(false);
-      setLastTickAt(null);
-      setInfo((cur) => cur ?? `cost $${(payload.cost ?? 0).toFixed(4)} · ${payload.durationMs ?? 0}ms`);
+      // 'result' can fire before the streaming 'text' deltas reach the
+      // client (race in socket delivery). Defer the streaming=false
+      // flip until React re-renders, where we check whether an
+      // assistant bubble has actually accumulated content. If not,
+      // leave streaming=true and let the 90s timeout act as a
+      // backstop — this keeps the TypingPill up so the bubble has
+      // a chance to fill in via subsequent 'text' deltas. ('message'
+      // arrives via 'message_saved' once the assistant reply
+      // persists, so the user has a stable id to inspect.)
+      const hasAssistant =
+        messagesRef.current.length > 0 &&
+        messagesRef.current[messagesRef.current.length - 1]?.role === "assistant" &&
+        (messagesRef.current[messagesRef.current.length - 1]?.content?.length ?? 0) > 0;
+      if (hasAssistant || payload.isError) {
+        setStreaming(false);
+        setLastTickAt(null);
+        setInfo((cur) => cur ?? `cost $${(payload.cost ?? 0).toFixed(4)} · ${payload.durationMs ?? 0}ms`);
+      }
     }
     function onStop(payload: { sessionId: number }) {
       if (!isMine(payload)) return;
