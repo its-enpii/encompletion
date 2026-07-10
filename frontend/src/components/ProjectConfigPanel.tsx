@@ -57,6 +57,17 @@ export default function ProjectConfigPanel({ projectId }: Props) {
   const [knTitle, setKnTitle] = useState("");
   const [knType, setKnType] = useState<"text" | "file">("text");
   const [knContent, setKnContent] = useState("");
+  // Staged file upload for knowledge rows. We POST via two steps:
+  // (1) PUT /api/attachments to push the bytes to STORAGE_PATH, then
+  // (2) POST /api/projects/:id/knowledge referencing the returned
+  // file_path. We keep both values here so the second step knows
+  // where the file landed and the metadata to record.
+  const [knFile, setKnFile] = useState<{
+    name: string;
+    mime: string;
+    size: number;
+    dataBase64: string;
+  } | null>(null);
 
   async function load() {
     setLoading(true);
@@ -132,12 +143,49 @@ export default function ProjectConfigPanel({ projectId }: Props) {
 
   async function addKnowledge() {
     if (!knTitle.trim()) return;
-    await authFetch(`/api/projects/${projectId}/knowledge`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: knTitle, type: knType, content: knType === "text" ? knContent : null }),
-    });
-    setKnTitle(""); setKnContent(""); setShowKnowForm(false);
+    if (knType === "text") {
+      await authFetch(`/api/projects/${projectId}/knowledge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: knTitle, type: "text", content: knContent || null }),
+      });
+    } else {
+      // File-type knowledge: ship the bytes to /api/attachments so the
+      // backend stores them under STORAGE_PATH. Then reference that
+      // path from the project_knowledge row. (Don't put the bytes in
+      // the JSON body — keeps requests small and avoids base64-in-DB.)
+      if (!knFile) {
+        setKnTitle(""); setKnContent(""); setKnFile(null); setShowKnowForm(false);
+        return;
+      }
+      const upRes = await authFetch("/api/attachments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          files: [{ name: knFile.name, mime_type: knFile.mime, dataBase64: knFile.dataBase64 }],
+        }),
+      });
+      if (!upRes.ok) {
+        const d = await upRes.json().catch(() => ({}));
+        throw new Error(d.error || `upload failed: HTTP ${upRes.status}`);
+      }
+      const upData = await upRes.json();
+      const uploaded = upData.files?.[0];
+      if (!uploaded?.file_path) throw new Error("upload returned no file_path");
+      await authFetch(`/api/projects/${projectId}/knowledge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: knTitle,
+          type: "file",
+          file_path: uploaded.file_path,
+          file_name: knFile.name,
+          mime_type: knFile.mime,
+          size: knFile.size,
+        }),
+      });
+    }
+    setKnTitle(""); setKnContent(""); setKnFile(null); setShowKnowForm(false);
     load();
   }
 
@@ -364,11 +412,49 @@ export default function ProjectConfigPanel({ projectId }: Props) {
                     />
                   </div>
                 )}
+                {knType === "file" && (
+                  <div>
+                    <label className="label mb-1.5 block">File</label>
+                    <label className="flex cursor-pointer items-center gap-2 rounded-[var(--r-md)] border border-dashed border-[var(--line)] bg-[var(--paper-3)] px-3 py-2.5 text-xs text-[var(--ink-3)] transition-colors hover:border-[var(--magenta)]/40 hover:text-[var(--ink-2)]">
+                      <input
+                        type="file"
+                        hidden
+                        onChange={async (e) => {
+                          const f = e.target.files?.[0];
+                          e.currentTarget.value = "";
+                          if (!f) return;
+                          const buf = await f.arrayBuffer();
+                          setKnFile({
+                            name: f.name,
+                            mime: f.type || "application/octet-stream",
+                            size: f.size,
+                            dataBase64: btoa(String.fromCharCode(...new Uint8Array(buf))),
+                          });
+                        }}
+                      />
+                      {knFile ? (
+                        <span className="flex items-center gap-2 truncate">
+                          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0 text-[var(--ink-2)]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14 2 14 8 20 8" />
+                          </svg>
+                          <span className="truncate font-mono text-[var(--ink-2)]">{knFile.name}</span>
+                          <span className="shrink-0 text-[var(--ink-3)]">{(knFile.size / 1024).toFixed(1)} KB</span>
+                        </span>
+                      ) : (
+                        <span>Pilih file…</span>
+                      )}
+                    </label>
+                    <p className="mt-1.5 text-[11px] text-[var(--ink-3)]">
+                      Isi file akan di-include ke prompt saat chat di project ini. Max ~512KB total.
+                    </p>
+                  </div>
+                )}
                 <div className="flex justify-end gap-2 pt-1">
                   <Button variant="ghost" size="sm" onClick={() => setShowKnowForm(false)}>
                     Cancel
                   </Button>
-                  <Button variant="primary" size="sm" onClick={addKnowledge} disabled={!knTitle.trim()}>
+                  <Button variant="primary" size="sm" onClick={addKnowledge} disabled={!knTitle.trim() || (knType === "file" && !knFile)}>
                     <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
                       <polyline points="20 6 9 17 4 12" />
                     </svg>
