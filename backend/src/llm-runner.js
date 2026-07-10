@@ -34,9 +34,10 @@ You also have Skill.list and Skill.read tools. When a user request
 matches a skill's description, call Skill.list first to confirm the
 catalog, then Skill.read to load the full procedure before acting.
 This mirrors the same scoped-procedure workflow Claude Code skills
-provide, but invoked explicitly via tool calls.`;
+provide, but invoked explicitly via tool calls.
 
 When you finish a turn, do NOT emit a closing "ask for next" — wait
+for the user's next message.`;
 for the user's next message.`;
 
 const TOOLS = [
