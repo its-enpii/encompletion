@@ -27,7 +27,7 @@ type EditorState = {
   uploadedFiles: SkillFile[];
 };
 
-type Props = { onClose: () => void };
+type Props = { onClose: () => void; currentProjectId?: number | null; currentProjectName?: string | null; disabledCount?: number };
 
 const FRONTMATTER_DOC = `---
 description: One-line summary of what this skill does and when to use it
@@ -42,9 +42,12 @@ You can reference supporting files in the same folder, e.g. \`examples/sample.md
 
 /**
  * Skills manager — managed at the engine's home skills directory.
- * Opens from the composer without project context.
+ * Opens from the composer. When the active chat is project-bound,
+ * we surface how many skills are hidden from the chat via that
+ * project's opt-out list so the operator can navigate to the
+ * project config to lift the override.
  */
-export default function SkillsModal({ onClose }: Props) {
+export default function SkillsModal({ onClose, currentProjectId, currentProjectName, disabledCount = 0 }: Props) {
   const { confirm } = useUi();
   const [skills, setSkills] = useState<Skill[]>([]);
   const [root, setRoot] = useState<string>("");
@@ -406,6 +409,22 @@ export default function SkillsModal({ onClose }: Props) {
       {error && (
         <div className="mb-3 rounded-[var(--r-md)] border border-[var(--danger)]/40 bg-[var(--danger-50)] px-3 py-2 text-sm text-[var(--danger)]">
           {error}
+        </div>
+      )}
+
+      {currentProjectId && (
+        <div className="mb-3 flex items-start gap-2 rounded-[var(--r-md)] border border-[var(--magenta)]/30 bg-[var(--magenta-50)]/50 px-3 py-2 text-xs text-[var(--ink-2)]">
+          <svg viewBox="0 0 24 24" className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--magenta)]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 2v6h6V2" />
+            <rect x="3" y="2" width="18" height="20" rx="2" />
+          </svg>
+          <div className="flex-1">
+            <strong className="font-semibold">Chat terikat dengan project {currentProjectName ? `"${currentProjectName}"` : ""}.</strong>{" "}
+            {disabledCount > 0
+              ? `${disabledCount} skill disembunyikan untuk chat ini.`
+              : "Semua skill catalog terlihat (kecuali yang disembunyikan per-project)."}
+            {" "}Periksa tab <em>Skills</em> di project config untuk override.
+          </div>
         </div>
       )}
       {loading ? (

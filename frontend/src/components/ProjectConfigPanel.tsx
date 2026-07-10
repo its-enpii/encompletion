@@ -49,6 +49,10 @@ export default function ProjectConfigPanel({ projectId }: Props) {
   const [description, setDescription] = useState("");
   const [instructions, setInstructions] = useState("");
   const [color, setColor] = useState("#A84781");
+  // Per-project skill opt-outs (mirrors the global skill catalog
+  // shadowed by project-specific bans). Persisted on saveMeta.
+  const [allSkills, setAllSkills] = useState<{ name: string; description: string | null }[]>([]);
+  const [disabledSkills, setDisabledSkills] = useState<string[]>([]);
   const [savingMeta, setSavingMeta] = useState(false);
   const [metaDirty, setMetaDirty] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -72,13 +76,28 @@ export default function ProjectConfigPanel({ projectId }: Props) {
   async function load() {
     setLoading(true);
     try {
-      const data = await authFetch(`/api/projects/${projectId}`).then((r) => r.json());
+      const [data, skillsData] = await Promise.all([
+        authFetch(`/api/projects/${projectId}`).then((r) => r.json()),
+        authFetch("/api/skills").then((r) => r.json()).catch(() => ({ skills: [] })),
+      ]);
       setProject(data.project);
       setKnowledge(data.knowledge || []);
       setName(data.project.name);
       setDescription(data.project.description || "");
       setInstructions(data.project.instructions || "");
       setColor(data.project.color);
+      // Skill opt-outs come pre-parsed (route does the JSON.parse).
+      // Cast through unknown — backend may return a missing or
+      // non-array field on older rows and we want to fall back to [].
+      const ds = data.project.disabled_skills;
+      if (Array.isArray(ds)) setDisabledSkills(ds);
+      else setDisabledSkills([]);
+      // Skill catalog is loaded in parallel; keep only the fields
+      // the toggle UI needs to render a label + description.
+      const sk = Array.isArray(skillsData?.skills) ? skillsData.skills : [];
+      setAllSkills(
+        sk.map((s: any) => ({ name: s.name, description: s.description ?? null }))
+      );
       setMetaDirty(false);
     } finally {
       setLoading(false);
@@ -109,6 +128,7 @@ export default function ProjectConfigPanel({ projectId }: Props) {
           description: description.trim() || null,
           instructions: instructions || null,
           color,
+          disabled_skills: disabledSkills,
         }),
       });
       await load();
@@ -513,6 +533,74 @@ export default function ProjectConfigPanel({ projectId }: Props) {
                   </button>
                 </li>
               ))}
+            </ul>
+          )}
+        </Section>
+
+        {/* Skills — per-project opt-out. The catalog is global but
+            each project can shadow a name here so the LLM never sees
+            it (Skill.list and Skill.read return the filtered set
+            for any chat bound to this project). Edit toggles mark
+            the project dirty so saveMeta persists everything in
+            one PATCH. */}
+        <Section
+          title="Skills"
+          subtitle={
+            disabledSkills.length
+              ? `${disabledSkills.length} skill disembunyikan dari chat project ini`
+              : "Semua skill terlihat di chat project ini"
+          }
+          icon="cpu"
+        >
+          {allSkills.length === 0 ? (
+            <div className="rounded-[var(--r-md)] border border-dashed border-[var(--line-strong)] bg-[var(--paper-2)]/60 px-3 py-6 text-center">
+              <p className="text-xs font-medium text-[var(--ink-2)]">Belum ada skill di catalog</p>
+              <p className="mt-0.5 text-[11px] text-[var(--ink-3)]">Buka Skills di composer untuk menambah.</p>
+            </div>
+          ) : (
+            <ul className="flex flex-col gap-1.5">
+              {allSkills.map((s) => {
+                const off = disabledSkills.includes(s.name);
+                return (
+                  <li
+                    key={s.name}
+                    className="flex items-start gap-3 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-3)] p-2.5"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <code className="rounded bg-[var(--paper-2)] px-1.5 py-0.5 font-mono text-[11px] text-[var(--ink-2)]">{s.name}</code>
+                        <Pill tone={off ? "danger" : "success"}>
+                          {off ? "disembunyikan" : "aktif"}
+                        </Pill>
+                      </div>
+                      {s.description && (
+                        <p className="mt-1 line-clamp-2 text-[11px] text-[var(--ink-3)]">{s.description}</p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // Mark dirty so saveMeta persists the toggle.
+                        setMetaDirty(true);
+                        setDisabledSkills((cur) =>
+                          off ? cur.filter((n) => n !== s.name) : [...cur, s.name]
+                        );
+                      }}
+                      className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
+                        off ? "bg-[var(--danger)]/60" : "bg-[var(--success)]/70"
+                      }`}
+                      aria-pressed={!off}
+                      title={off ? "Enable untuk project ini" : "Disable untuk project ini"}
+                    >
+                      <span
+                        className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-all ${
+                          off ? "left-0.5" : "left-[18px]"
+                        }`}
+                      />
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </Section>

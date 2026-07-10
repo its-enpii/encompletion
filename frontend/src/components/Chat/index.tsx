@@ -677,7 +677,16 @@ export default function Chat({
         />
       )}
 
-      {showSkillsModal && <SkillsModal onClose={() => setShowSkillsModal(false)} />}
+      {showSkillsModal && (
+        <SkillsModal
+          onClose={() => setShowSkillsModal(false)}
+          currentProjectId={activeProject?.id ?? null}
+          currentProjectName={activeProject?.name ?? null}
+          disabledCount={
+            activeProject?.id ? (activeProject as any).disabled_skills_count ?? 0 : 0
+          }
+        />
+      )}
 
       <input
         ref={fileInputRef}
