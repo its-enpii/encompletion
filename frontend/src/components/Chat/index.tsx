@@ -66,7 +66,6 @@ export default function Chat({
     if (pathname?.startsWith("/projects/")) setProjectId(routeProjectId);
   }, [routeProjectId, pathname]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const [messages, setMessages] = useState<Msg[]>([]);
   const [toolUses, setToolUses] = useState<ToolUse[]>([]);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [attachmentsByMsg, setAttachmentsByMsg] = useState<Record<number, Att[]>>({});
@@ -82,14 +81,24 @@ export default function Chat({
   const [projects, setProjects] = useState<Project[]>([]);
   const [pendingAtts, setPendingAtts] = useState<PendingAtt[]>([]);
   const [showArtifactPanel, setShowArtifactPanelRaw] = useState(false);
-  // Keep a ref mirror of the latest messages list so the socket
-  // event handlers (registered once per sessionId) can check whether
-  // an assistant bubble has actually accumulated any content
-  // before flipping streaming=false. Without this, the 'result'
-  // event can race past the streaming 'text' deltas and the UI
-  // lands at 'loading hilang tapi balasan belum ada'.
+  // Mirror the messages list through this setter so any code path
+  // — setMessages from useEffect, onText socket handler, setMessages
+  // during regenerate, etc. — updates both React state and the ref
+  // synchronously. The ref matters because the 'result' socket
+  // handler reads from it to decide whether to flip streaming=false;
+  // if the ref lags the state (the buggy useEffect approach) we
+  // get a 'result' arriving while the assistant content was just
+  // appended → TypingPill stays up because messagesRef still
+  // reports 'no assistant bubble yet'.
+  const [messages, setMessagesRaw] = useState<Msg[]>([]);
   const messagesRef = useRef<Msg[]>([]);
-  useEffect(() => { messagesRef.current = messages; }, [messages]);
+  const setMessages = useCallback((updater: React.SetStateAction<Msg[]>) => {
+    setMessagesRaw((cur) => {
+      const next = typeof updater === "function" ? (updater as any)(cur) : updater;
+      messagesRef.current = next;
+      return next;
+    });
+  }, []);
   function setShowArtifactPanel(v: boolean) {
     setShowArtifactPanelRaw(v);
     setStored("artifacts:open", v ? "1" : "0");
