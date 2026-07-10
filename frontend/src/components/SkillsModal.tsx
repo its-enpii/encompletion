@@ -22,6 +22,9 @@ type EditorState = {
   creating: boolean;
   name: string;
   content: string;
+  // Supporting files visible in the editor scope. Reset on save;
+  // reloaded from the new skill row's `files` once the modal closes.
+  uploadedFiles: SkillFile[];
 };
 
 type Props = { onClose: () => void };
@@ -66,11 +69,11 @@ export default function SkillsModal({ onClose }: Props) {
   useEffect(() => { load(); }, []);
 
   function startCreate() {
-    setEditing({ creating: true, name: "", content: FRONTMATTER_DOC });
+    setEditing({ creating: true, name: "", content: FRONTMATTER_DOC, uploadedFiles: [] });
     setError(null);
   }
   function startEdit(s: Skill) {
-    setEditing({ creating: false, name: s.name, content: s.frontmatter ?? "" });
+    setEditing({ creating: false, name: s.name, content: s.frontmatter ?? "", uploadedFiles: s.files });
     setError(null);
   }
 
@@ -103,6 +106,81 @@ export default function SkillsModal({ onClose }: Props) {
       await load();
     } catch (e: any) {
       setError(e?.message || "save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Upload (or, for zip/rar, extract-into) a supporting file.
+  // Uses POST /api/skills/:name/files with a base64 payload. The
+  // backend transparently detects zip magic bytes and extracts
+  // into the skill folder; otherwise writes a single file.
+  async function uploadFile(file: File) {
+    if (!editing) return;
+    if (editing.creating) {
+      setError("Simpan skill dulu sebelum tambah file pendukung.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const buf = await file.arrayBuffer();
+      const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+      const r = await authFetch(
+        `/api/skills/${encodeURIComponent(editing.name)}/files`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dataBase64: b64, name: file.name }),
+        }
+      );
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d.error || `HTTP ${r.status}`);
+      }
+      const data = await r.json();
+      // Backend returns the fresh file list when extraction happens,
+      // otherwise just the new file entry. Coalesce into local state.
+      if (Array.isArray(data.files)) {
+        setEditing({ ...editing, uploadedFiles: data.files });
+      } else if (data.file) {
+        setEditing({
+          ...editing,
+          uploadedFiles: [...editing.uploadedFiles.filter((f) => f.name !== data.file.name), data.file],
+        });
+      }
+      await load();
+    } catch (e: any) {
+      setError(e?.message || "upload failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteFile(name: string) {
+    if (!editing) return;
+    const ok = await confirm({
+      title: "Hapus file",
+      message: `Hapus file "${name}" dari skill ini?`,
+      confirmLabel: "Hapus",
+      destructive: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await authFetch(
+        `/api/skills/${encodeURIComponent(editing.name)}/files/${encodeURIComponent(name)}`,
+        { method: "DELETE" }
+      );
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d.error || `HTTP ${r.status}`);
+      }
+      setEditing({ ...editing, uploadedFiles: editing.uploadedFiles.filter((f) => f.name !== name) });
+      await load();
+    } catch (e: any) {
+      setError(e?.message || "delete failed");
     } finally {
       setBusy(false);
     }
@@ -167,9 +245,78 @@ export default function SkillsModal({ onClose }: Props) {
             <textarea
               value={editing.content}
               onChange={(e) => setEditing({ ...editing, content: e.target.value })}
-              className="input h-[55vh] font-mono text-xs leading-relaxed"
+              className="input h-[40vh] font-mono text-xs leading-relaxed"
               spellCheck={false}
             />
+          </div>
+
+          {/* Supporting files. Hidden in the create flow until the row
+              exists; for the edit flow we surface everything the
+              server currently exposes for this skill. Drop a .zip
+              to bulk-load a folder; any other file goes straight
+              under the skill folder at the basename. */}
+          <div className="border-t border-[var(--line)] pt-3">
+            <div className="mb-2 flex items-center justify-between">
+              <label className="label">File pendukung</label>
+              {!editing.creating && (
+                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-2)] px-2 py-1 text-[11px] text-[var(--ink-2)] transition-colors hover:border-[var(--magenta)]/40 hover:bg-[var(--paper-3)] hover:text-[var(--ink)]">
+                  <input
+                    type="file"
+                    hidden
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) uploadFile(f);
+                      e.currentTarget.value = "";
+                    }}
+                  />
+                  Tambah file…
+                </label>
+              )}
+            </div>
+
+            {!editing.creating && (
+              <div
+                onDragOver={(e) => { e.preventDefault(); }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const f = e.dataTransfer.files?.[0];
+                  if (f) uploadFile(f);
+                }}
+                className="rounded-[var(--r-md)] border border-dashed border-[var(--line)] bg-[var(--paper-2)]/40 px-3 py-3 text-center text-[11px] text-[var(--ink-3)] transition-colors hover:border-[var(--magenta)]/40 hover:text-[var(--ink-2)]"
+              >
+                Drop file di sini (.zip untuk auto-extract)
+              </div>
+            )}
+
+            {editing.uploadedFiles.length > 0 && (
+              <ul className="mt-3 space-y-1 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-2)]/50 p-2">
+                {editing.uploadedFiles.map((f) => (
+                  <li
+                    key={f.name}
+                    className="flex items-center justify-between gap-2 rounded-[var(--r-sm)] bg-[var(--paper-3)] px-2.5 py-1.5 text-xs"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0 text-[var(--ink-3)]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+                      </svg>
+                      <span className="truncate font-mono text-[var(--ink-2)]">{f.name}</span>
+                      <span className="shrink-0 text-[var(--ink-3)]">
+                        {(f.size / 1024).toFixed(1)} KB
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => deleteFile(f.name)}
+                      className="rounded-[var(--r-sm)] px-1.5 py-0.5 text-[11px] text-[var(--ink-3)] transition-colors hover:bg-[var(--danger-50)] hover:text-[var(--danger)] disabled:opacity-50"
+                    >
+                      Hapus
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </div>
       </CenteredDialog>
