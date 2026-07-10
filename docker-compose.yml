@@ -39,7 +39,14 @@ services:
       - NEXT_PUBLIC_API_URL=http://backend:4000
 
   nginx:
-    image: nginx:alpine
+    # Custom build so we can drop a healthcheck-reload watchdog into
+    # the same container as nginx. The alpine base already has wget
+    # and sh; we just add one script file. Replaces the upstream-
+    # nginx:alpine image so a backing container restart no longer
+    # strands us with a stale DNS cache for an hour.
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
     container_name: claude-web-nginx
     restart: unless-stopped
     ports:
