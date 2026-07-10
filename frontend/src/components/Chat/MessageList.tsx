@@ -63,7 +63,7 @@ export function MessageList({
             </div>
           );
         })}
-        {streaming && messages[messages.length - 1]?.content === "" && <TypingPill />}
+        {streaming && <TypingPill />}
         <div className="h-6" />
       </div>
       {showJump && <JumpToBottom onClick={onJump} />}
