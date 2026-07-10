@@ -194,63 +194,142 @@ export default function Chat({
   }, [streaming, lastTickAt]);
 
   // Socket streaming.
+  //
+  // The backend emits events with `sessionId` (camelCase) and a broader
+  // event vocabulary than this file used to subscribe to. The previous
+  // version only listened to `tick`/`chunk`/`tool_use`/`artifact`/`usage`/
+  // `done`/`error_evt` and read `payload.session_id` (snake_case) — both
+  // mismatches meant every event was gated out by the session check and
+  // every text event was simply discarded. The UI sat at "Sedang
+  // berpikir..." with no assistant text ever appearing.
+  //
+  // Subscribe to ALL engine-emitted events with a single id-extractor
+  // helper. Events that don't carry a sessionId (artifacts_dup, etc) are
+  // matched on the active session id where applicable.
   useEffect(() => {
     const socket = getSocket();
 
-    function onTick(payload: { session_id: number }) {
-      if (payload.session_id === sessionId) {
-        setLastTickAt(Date.now());
-        setStale(false);
-      }
+    // Helper: every event that names a session carries it as `sessionId`
+    // (camelCase) on the backend. The earlier snake_case reads silently
+    // failed. Tolerant: accept either form just in case.
+    const forSession = (payload: any): number | null => {
+      if (!payload) return null;
+      const v = payload.sessionId ?? payload.session_id;
+      return typeof v === "number" ? v : null;
+    };
+    const isMine = (payload: any) => {
+      const sid = forSession(payload);
+      return sid === null || sid === sessionId;
+    };
+
+    function onStart(payload: { sessionId: number; messageId: number | null }) {
+      if (!isMine(payload)) return;
+      setInfo(`Run started (model ${payload.messageId ? "…" : "init"})`);
     }
-    function onChunk(payload: { session_id: number; delta: string; message_id?: number }) {
-      if (payload.session_id !== sessionId) return;
+    function onSystem(payload: { sessionId: number; claudeSessionId?: string; model?: string }) {
+      if (!isMine(payload)) return;
+      if (payload.model) setInfo(`Engine: ${payload.model}`);
+    }
+    function onText(payload: { sessionId: number; text: string }) {
+      if (!isMine(payload)) return;
+      // No active assistant message? It's the first delta of a new turn
+      // — append one with the delta as content.
       setMessages((cur) => {
         const last = cur[cur.length - 1];
-        if (!last || last.role !== "assistant" || last.id !== payload.message_id) return cur;
-        return [...cur.slice(0, -1), { ...last, content: last.content + payload.delta }];
+        if (last && last.role === "assistant") {
+          return [...cur.slice(0, -1), { ...last, content: last.content + payload.text }];
+        }
+        return [...cur, { id: 0, role: "assistant", content: payload.text }];
       });
     }
-    function onToolUse(payload: { session_id: number; tool: ToolUse }) {
-      if (payload.session_id !== sessionId) return;
-      setToolUses((cur) => [...cur, payload.tool]);
+    function onStderr(payload: { sessionId?: number; text: string }) {
+      if (!isMine(payload)) return;
+      // Surface CLI stderr in the error banner so the operator sees
+      // what the engine complained about, not just "request failed".
+      setError((cur) => cur ?? payload.text.slice(0, 240));
     }
-    function onArtifact(payload: { session_id: number; artifact: Artifact }) {
-      if (payload.session_id !== sessionId) return;
-      setArtifacts((cur) => [...cur, payload.artifact]);
-    }
-    function onUsage(payload: { session_id: number; usage: Usage }) {
-      if (payload.session_id !== sessionId) return;
-      setUsage(payload.usage);
-    }
-    function onDone(payload: { session_id: number }) {
-      if (payload.session_id !== sessionId) return;
-      setStreaming(false);
-      setLastTickAt(null);
-      setSidebarRefresh((s) => s + 1);
-    }
-    function onError(payload: { session_id: number; message: string }) {
-      if (payload.session_id !== sessionId) return;
+    function onError(payload: { sessionId?: number; message: string }) {
+      if (!isMine(payload)) return;
       setError(payload.message);
       setStreaming(false);
     }
+    function onResult(payload: { sessionId: number; isError: boolean; errorMessage?: string; cost?: number; durationMs?: number; inputTokens?: number; outputTokens?: number }) {
+      if (!isMine(payload)) return;
+      if (payload.isError) {
+        setError(payload.errorMessage || "engine returned is_error=true");
+      }
+      setStreaming(false);
+      setLastTickAt(null);
+      setInfo((cur) => cur ?? `cost $${(payload.cost ?? 0).toFixed(4)} · ${payload.durationMs ?? 0}ms`);
+    }
+    function onStop(payload: { sessionId: number }) {
+      if (!isMine(payload)) return;
+      setStreaming(false);
+    }
+    function onTick(payload: any) {
+      if (!isMine(payload)) return;
+      setLastTickAt(Date.now());
+      setStale(false);
+    }
+    function onToolUse(payload: any) {
+      if (!isMine(payload)) return;
+      const tool = payload.tool ?? payload;
+      setToolUses((cur) => [...cur, tool as ToolUse]);
+    }
+    function onArtifact(payload: any) {
+      if (!isMine(payload)) return;
+      const art = payload.artifact ?? payload;
+      setArtifacts((cur) => [...cur, art as Artifact]);
+    }
+    function onMessageSaved(payload: { messageId: number }) {
+      // Re-hydrate from DB so subsequent reloads see the persisted
+      // assistant message even though we only streamed partials.
+      // Lightweight: just mark the last assistant message with the id.
+      setMessages((cur) => {
+        if (cur.length === 0) return cur;
+        const idx = cur.findLastIndex((m) => m.role === "assistant");
+        if (idx === -1) return cur;
+        const copy = cur.slice();
+        copy[idx] = { ...copy[idx], id: payload.messageId };
+        return copy;
+      });
+      setSidebarRefresh((s) => s + 1);
+    }
 
-    socket.on("tick", onTick);
-    socket.on("chunk", onChunk);
+    socket.on("start", onStart);
+    socket.on("system", onSystem);
+    socket.on("text", onText);
+    socket.on("stderr", onStderr);
     socket.on("tool_use", onToolUse);
     socket.on("artifact", onArtifact);
-    socket.on("usage", onUsage);
-    socket.on("done", onDone);
-    socket.on("error_evt", onError);
+    socket.on("tool_result", () => { /* no-op for now; artefact shown via tool_use */ });
+    socket.on("artifact_dup", () => { /* dedupe marker; we don't render duplicates */ });
+    socket.on("artifact_rejections", () => { /* noise-reduction summary; not currently surfaced */ });
+    socket.on("message_saved", onMessageSaved);
+    socket.on("attachments_saved", () => { /* used by composer; nothing to do here */ });
+    socket.on("result", onResult);
+    socket.on("stopped", onStop);
+    socket.on("tick", onTick);
+    // Legacy: backend used to emit "error" and "error_evt"; both still
+    // funnel through onError above.
+    socket.on("error", onError);
 
     return () => {
-      socket.off("tick", onTick);
-      socket.off("chunk", onChunk);
+      socket.off("start", onStart);
+      socket.off("system", onSystem);
+      socket.off("text", onText);
+      socket.off("stderr", onStderr);
       socket.off("tool_use", onToolUse);
       socket.off("artifact", onArtifact);
-      socket.off("usage", onUsage);
-      socket.off("done", onDone);
-      socket.off("error_evt", onError);
+      socket.off("tool_result");
+      socket.off("artifact_dup");
+      socket.off("artifact_rejections");
+      socket.off("message_saved", onMessageSaved);
+      socket.off("attachments_saved");
+      socket.off("result", onResult);
+      socket.off("stopped", onStop);
+      socket.off("tick", onTick);
+      socket.off("error", onError);
     };
   }, [sessionId]);
 
@@ -272,44 +351,62 @@ export default function Chat({
     setStreaming(true);
     setLastTickAt(Date.now());
     setStale(false);
-    let newSessionId: number | null = null;
-    try {
-      const r = await authFetch("/api/sessions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: text.slice(0, 80),
-          model,
-          project_id: projectId,
-          attachments: pendingAtts.map((a) => ({ file_name: a.file_name, mime_type: a.mime_type, size: a.size, content: a.content, file_path: a.file_path })),
-        }),
-      });
+
+    // Optimistic UI: drop the user message in immediately so the chat
+    // bubble is visible while the server processes. The DB row will be
+    // persisted by the socket handler and the optimistic id replaced via
+    // message_saved (or via a follow-up reload when the session
+    // resolves).
+    setMessages((cur) => [...cur, { id: 0, role: "user", content: text }]);
+    setInfo(`Mengirim…`);
+
+    // Resolve which session id we're targeting. If we're already inside
+    // a session (e.g. visiting /chat/[id] directly), reuse it; only POST
+    // a new session row when this is a fresh conversation. Previous
+    // versions POSTed on every send, which silently orphaned every
+    // follow-up message into a new session — that's the cause of "my
+    // reply disappeared after the first assistant response".
+    let targetSessionId = sessionId;
+    if (!targetSessionId) {
+      try {
+        const r = await authFetch("/api/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: text.slice(0, 80),
+            model,
+            project_id: projectId,
+          }),
+        });
+        setPendingAtts([]);
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          throw new Error(d.error || `HTTP ${r.status}`);
+        }
+        const data = await r.json();
+        targetSessionId = data.id ?? data.session_id;
+        if (targetSessionId) {
+          // Navigate before emitting so the chat effect's [sessionId]
+          // listener is registered against the new id by the time the
+          // server starts emitting `start` / `text` / `result`.
+          router.push(`/chat/${targetSessionId}`);
+        }
+        setSidebarRefresh((s) => s + 1);
+      } catch (e: any) {
+        setError(e?.message || "Gagal membuat session");
+        setStreaming(false);
+        return;
+      }
+    } else {
+      // Existing session: the server's socket 'prompt' handler persists
+      // the user message itself (see server.js `socket.on('prompt')`).
+      // We just need to clear the composer-attachment list so the next
+      // send starts empty.
       setPendingAtts([]);
-      if (!r.ok) {
-        const d = await r.json().catch(() => ({}));
-        throw new Error(d.error || `HTTP ${r.status}`);
-      }
-      const data = await r.json();
-      newSessionId = data.id ?? data.session_id;
-      if (!sessionId && newSessionId) {
-        // Navigate before emitting so the chat effect's [sessionId]
-        // listener is registered against the new session id by the time
-        // the server starts emitting `start` / `text` / `result` events.
-        router.push(`/chat/${newSessionId}`);
-      }
-      setSidebarRefresh((s) => s + 1);
-    } catch (e: any) {
-      setError(e?.message || "Gagal kirim");
-      setStreaming(false);
-      return;
     }
 
-    // Always emit the prompt over the socket for BOTH new sessions and
-    // existing ones — POST /api/sessions only persists the row, the
-    // actual Claude invocation flows through this `prompt` event. The
-    // previous version of this function created the row but never
-    // emitted, which left the UI stuck in streaming with no provider
-    // request landing on the server.
+    // Always emit the prompt over the socket — that's the path the
+    // engine listens on. POST /api/sessions only persists the row.
     try {
       const socket = getSocket();
       socket.emit(
@@ -317,7 +414,7 @@ export default function Chat({
         {
           prompt: text,
           model,
-          sessionId: newSessionId ?? sessionId,
+          sessionId: targetSessionId,
           projectId,
           effort,
         },
