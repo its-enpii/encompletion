@@ -307,11 +307,29 @@ io.on('connection', (socket) => {
     const runner = ENGINE === "claude"
       ? runClaude
       : (await import("./llm-runner.js")).runLLM;
+    // Project-scoped opt-outs. Parsed here so the LLM runner
+    // never sees disabled names — neither in the system's Skill.list
+    // catalog nor in a Skill.read call's allowed inputs. JSON in
+    // SQLite is just text; we treat it as an array of names and
+    // validate each one against `safeName` from skill_loader.
+    let disabledSkills = [];
+    if (dbSession.project_id) {
+      const proj = db.prepare('SELECT disabled_skills FROM projects WHERE id = ?').get(dbSession.project_id);
+      if (proj?.disabled_skills) {
+        try {
+          const arr = JSON.parse(proj.disabled_skills);
+          if (Array.isArray(arr)) disabledSkills = arr.filter((n) => typeof n === 'string').slice(0, 256);
+        } catch { /* leave empty — corrupt JSON should not break the chat */ }
+      }
+    }
+
     activeRunner = runner(
       finalPrompt,
       {
         model: dbSession.model,
         effort: effort || process.env.DEFAULT_EFFORT || undefined,
+        projectId: dbSession.project_id ?? undefined,
+        disabledSkills,
       },
       (evt) => {
         // Compact one-line summary at the boundaries; per-token text

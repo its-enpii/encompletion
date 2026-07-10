@@ -146,6 +146,10 @@ export function runLLM(prompt, opts = {}, onEvent) {
   const startedAt = Date.now();
   const modelName = opts.model || process.env.LLM_DEFAULT_MODEL || "workspace";
   const cwd = opts.cwd || process.cwd();
+  // Per-project opt-outs: a disabled skill name is invisible to both
+  // Skill.list and Skill.read. Snapshot once at turn start so a model
+  // that re-lists mid-conversation can't see different content.
+  const disabledSkills = Array.isArray(opts.disabledSkills) ? opts.disabledSkills : [];
   const messages = [
     { role: "system", content: SYSTEM_PROMPT },
     { role: "user", content: prompt },
@@ -336,7 +340,7 @@ export function runLLM(prompt, opts = {}, onEvent) {
           // Skill.* tools don't take cwd or deadlines; the others do.
           let r;
           if (tc.name === "Skill.list" || tc.name === "Skill.read") {
-            r = await runSkillTool(tc.name, args);
+            r = await runSkillTool(tc.name, args, { disabled: disabledSkills });
           } else {
             r = await runTool(tc.name, args, {
               cwd,

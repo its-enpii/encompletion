@@ -65,6 +65,15 @@ router.get('/:id', (req, res) => {
       'SELECT * FROM sessions WHERE project_id = ? AND archived_at IS NULL ORDER BY updated_at DESC'
     )
     .all(req.params.id);
+  // Parse the JSON-encoded skill opt-out list once so the UI can
+  // render it without having to do JSON.parse itself. Fallback to
+  // [] on any corruption — a malformed cell should not break the
+  // config page.
+  if (project) {
+    try {
+      project.disabled_skills = JSON.parse(project.disabled_skills || '[]');
+    } catch { project.disabled_skills = []; }
+  }
   res.json({ project, knowledge, sessions });
 });
 
@@ -73,7 +82,7 @@ router.patch('/:id', (req, res) => {
   const own = ownProjectOr404(req.params.id, req.user);
   if (!own) return res.status(404).json({ error: 'not found' });
 
-  const { name, description, instructions, color, archived } = req.body || {};
+  const { name, description, instructions, color, archived, disabled_skills } = req.body || {};
   const fields = [];
   const params = [];
   if (name !== undefined) { fields.push('name = ?'); params.push(name); }
@@ -83,6 +92,17 @@ router.patch('/:id', (req, res) => {
   if (archived !== undefined) {
     fields.push('archived_at = ?');
     params.push(archived ? new Date().toISOString() : null);
+  }
+  if (disabled_skills !== undefined) {
+    // Array of skill names. Coerce + bound length so a malformed
+    // request body can't blow up the column. Stored as JSON text.
+    if (!Array.isArray(disabled_skills)) return res.status(400).json({ error: 'disabled_skills must be an array' });
+    const names = disabled_skills
+      .filter((n) => typeof n === 'string')
+      .map((n) => n.slice(0, 100))
+      .slice(0, 256);
+    fields.push('disabled_skills = ?');
+    params.push(JSON.stringify(names));
   }
   if (!fields.length) return res.status(400).json({ error: 'no fields' });
   fields.push('updated_at = CURRENT_TIMESTAMP');

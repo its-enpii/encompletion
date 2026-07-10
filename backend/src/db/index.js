@@ -236,6 +236,17 @@ function migrate() {
     seed.run('claude-sonnet-4-6', 'Sonnet 4.6', 10);
     seed.run('claude-haiku-4-5', 'Haiku 4.5', 20);
   }
+
+  // Project-level skill overrides: per-project opt-out list of skill
+  // names from the global catalog. Stored as JSON text (SQLite has no
+  // array type) — parsed at read time. All projects default to "[]",
+  // i.e. the global skill set applies fully until the admin chooses
+  // otherwise. Backed by the chat-time filter in runLLM so a model
+  // never sees (or auto-loads) a skill the operator has silenced.
+  const projCols = db.prepare("PRAGMA table_info(projects)").all().map((c) => c.name);
+  if (!projCols.includes("disabled_skills")) {
+    db.exec("ALTER TABLE projects ADD COLUMN disabled_skills TEXT NOT NULL DEFAULT '[]'");
+  }
 }
 
 migrate();

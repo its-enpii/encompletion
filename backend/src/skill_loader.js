@@ -34,7 +34,14 @@ function safeName(name) {
   return name;
 }
 
-function listSkills() {
+/**
+ * List skills, optionally filtering out names from `disabled` (e.g. a
+ * project's opt-out list). The full registry on disk is the source of
+ * truth — chat-time filtering is just omission, not deletion. Returns
+ * a snapshot that's stable enough to be embedded in a system prompt
+ * without surprises mid-turn.
+ */
+function listSkills(disabled = []) {
   try {
     fs.mkdirSync(SKILLS_ROOT, { recursive: true });
   } catch (e) {
@@ -43,9 +50,11 @@ function listSkills() {
   let entries;
   try { entries = fs.readdirSync(SKILLS_ROOT, { withFileTypes: true }); }
   catch { return { root: SKILLS_ROOT, skills: [] }; }
+  const skip = new Set(disabled.filter((n) => typeof n === "string"));
   const skills = [];
   for (const e of entries) {
     if (!e.isDirectory()) continue;
+    if (skip.has(e.name)) continue;
     const dir = path.join(SKILLS_ROOT, e.name);
     const md = path.join(dir, "SKILL.md");
     if (!fs.existsSync(md)) continue;
@@ -62,9 +71,15 @@ function listSkills() {
   return { root: SKILLS_ROOT, skills };
 }
 
-function readSkill(name) {
+function readSkill(name, disabled = new Set()) {
   const safe = safeName(name);
   if (!safe) return { error: "invalid skill name" };
+  if (disabled.has(safe)) {
+    // Don't reveal whether the name was real-or-shadowed. A flat
+    // "skill not found" is enough — same response whether the file
+    // doesn't exist OR the project opted out.
+    return { error: "skill not found" };
+  }
   const md = path.join(SKILLS_ROOT, safe, "SKILL.md");
   let stat;
   try { stat = fs.statSync(md); } catch { return { error: "skill not found" }; }
@@ -133,8 +148,9 @@ export const skillTools = [
   },
 ];
 
-export async function runSkillTool(name, args) {
-  if (name === "Skill.list") return { text: JSON.stringify(listSkills(), null, 2) };
-  if (name === "Skill.read") return readSkill(args?.name || "");
+export async function runSkillTool(name, args, { disabled = [] } = {}) {
+  const skip = new Set(disabled.filter((n) => typeof n === "string"));
+  if (name === "Skill.list") return { text: JSON.stringify(listSkills(disabled), null, 2) };
+  if (name === "Skill.read") return readSkill(args?.name || "", skip);
   return { error: `unknown skill tool: ${name}` };
 }
