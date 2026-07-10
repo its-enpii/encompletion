@@ -227,17 +227,48 @@ io.on('connection', (socket) => {
         const parts = [];
         if (project.instructions) parts.push(`[Project Instructions]\n${project.instructions}`);
         const knowledge = db
-          .prepare('SELECT title, type, content, file_name FROM project_knowledge WHERE project_id = ?')
+          .prepare('SELECT title, type, content, file_path, file_name, mime_type, size FROM project_knowledge WHERE project_id = ?')
           .all(dbSession.project_id);
         if (knowledge.length) {
+          // File-type knowledge is inlined as plain text so the model
+          // can read it without guessing. The previous behaviour was
+          // to drop a `file: name.pdf` reference and hope the model
+          // would fetch it via the Bash/Read tools — that worked
+          // for the Claude CLI runner (which can talk to the
+          // backend /api/attachments endpoint) but the LLM runner
+          // has no such pathway without an explicit tool. Inline
+          // the bytes so the model sees them.
+          // We bound the total knowledge size to ~512KB so a single
+          // page-full of attachments can't push the system prompt
+          // past its limits; longer files are truncated with a
+          // marker so the model knows there's more.
+          const MAX_KNOWLEDGE_BYTES = 512 * 1024;
+          let knowledgeBytes = 0;
           parts.push(
             '[Project Knowledge]\n' +
-              knowledge
-                .map((k) => {
-                  if (k.type === 'text') return `--- ${k.title} ---\n${k.content || ''}`;
-                  return `--- ${k.title} (file: ${k.file_name || 'attached'}) ---`;
-                })
-                .join('\n\n')
+              knowledge.map((k) => {
+                if (k.type === 'text') {
+                  const body = k.content || '';
+                  knowledgeBytes += Buffer.byteLength(body, 'utf8');
+                  return `--- ${k.title} ---\n${body}`;
+                }
+                // file: read the bytes off disk via storage path
+                const rel = k.file_path || '';
+                const abs = rel.startsWith('/')
+                  ? rel
+                  : (process.env.STORAGE_PATH
+                      ? require('node:path').resolve(process.env.STORAGE_PATH, rel)
+                      : rel);
+                let body = '';
+                try { body = require('node:fs').readFileSync(abs, 'utf8'); }
+                catch (e) { body = `[unable to read file: ${e.message}]`; }
+                if (Buffer.byteLength(body, 'utf8') + knowledgeBytes > MAX_KNOWLEDGE_BYTES) {
+                  body = body.slice(0, Math.max(0, MAX_KNOWLEDGE_BYTES - knowledgeBytes))
+                    + `\n\n[truncated, total knowledge budget exceeded]`;
+                }
+                knowledgeBytes += Buffer.byteLength(body, 'utf8');
+                return `--- ${k.title} (file: ${k.file_name || 'attached'}, ${k.mime_type || 'application/octet-stream'}, ${k.size || '?'} bytes) ---\n${body}`;
+              }).join('\n\n')
           );
         }
         if (parts.length) prefix += parts.join('\n\n') + '\n\n';
