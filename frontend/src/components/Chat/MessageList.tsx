@@ -1,15 +1,30 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import ToolBlock, { type ToolUse } from "@/components/ToolBlock";
 import { MessageBubble, TypingPill } from "./MessageBubble";
 import { JumpToBottom } from "./JumpToBottom";
+import { ArtifactCard } from "./ArtifactCard";
+import { ArtifactViewerDialog } from "./ArtifactViewerDialog";
+import { authFetch } from "@/lib/auth";
 import type { Att, Msg } from "./types";
+
+type ArtifactLite = {
+  id: number;
+  type: string;
+  language: string | null;
+  title: string | null;
+  // Truncated preview for the card body. Full content loads from
+  // ArtifactViewer modal where it can stream in lazily.
+  content_preview: string;
+  line_count: number;
+};
 
 export function MessageList({
   messages,
   toolUses,
   attachmentsByMsg,
+  artifactsByMsg,
   streaming,
   showJump,
   onScroll,
@@ -21,6 +36,7 @@ export function MessageList({
   messages: Msg[];
   toolUses: ToolUse[];
   attachmentsByMsg: Record<number, Att[]>;
+  artifactsByMsg: Record<number, ArtifactLite[]>;
   streaming: boolean;
   showJump: boolean;
   onScroll: (gap: number) => void;
@@ -29,6 +45,7 @@ export function MessageList({
   sessionId: number | null;
   onRegenerate?: (assistantMsgId: number) => void;
 }) {
+  const [openArtifact, setOpenArtifact] = useState<{ id: number; title?: string | null } | null>(null);
   return (
     <div
       ref={mainScrollRef}
@@ -60,6 +77,17 @@ export function MessageList({
                       <ToolBlock tool={t} />
                     </div>
                   ))}
+              {m.role === "assistant" && artifactsByMsg[m.id]?.length ? (
+                <div className="flex flex-col gap-2 pl-12">
+                  {artifactsByMsg[m.id].map((a) => (
+                    <ArtifactCard
+                      key={a.id}
+                      artifact={a}
+                      onOpen={() => setOpenArtifact({ id: a.id, title: a.title })}
+                    />
+                  ))}
+                </div>
+              ) : null}
             </div>
           );
         })}
@@ -67,6 +95,13 @@ export function MessageList({
         <div className="h-6" />
       </div>
       {showJump && <JumpToBottom onClick={onJump} />}
+      {openArtifact && (
+        <ArtifactViewerDialog
+          artifactId={openArtifact.id}
+          title={openArtifact.title}
+          onClose={() => setOpenArtifact(null)}
+        />
+      )}
     </div>
   );
 }

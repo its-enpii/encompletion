@@ -13,6 +13,7 @@ import attachmentsRouter from './routes/attachments.js';
 import usersRouter from './routes/users.js';
 import skillsRouter from './routes/skills.js';
 import modelsRouter from './routes/models.js';
+import artifactsRouter from './routes/artifacts.js';
 import { requireAuth, socketAuth } from './middleware/auth.js';
 import { detectArtifacts, evaluateArtifact } from './artifact-detector.js';
 
@@ -49,6 +50,7 @@ app.use('/api/attachments', requireAuth, attachmentsRouter);
 // so they're global per-user, not per-session. Any logged-in user can manage.
 app.use('/api/skills', requireAuth, skillsRouter);
 app.use('/api/models', requireAuth, modelsRouter);
+app.use('/api/artifacts', requireAuth, artifactsRouter);
 
 // ----- Socket.IO -----
 const server = http.createServer(app);

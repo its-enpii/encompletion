@@ -69,6 +69,11 @@ export default function Chat({
   const [toolUses, setToolUses] = useState<ToolUse[]>([]);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [attachmentsByMsg, setAttachmentsByMsg] = useState<Record<number, Att[]>>({});
+  // Map of message_id -> compact artifact info for the inline cards.
+  // Only carries a short preview string here so the messages array
+  // doesn't bloat on long transcripts; the full content is loaded
+  // on demand when an ArtifactCard is clicked.
+  const [artifactsByMsg, setArtifactsByMsg] = useState<Record<number, { id: number; type: string; language: string | null; title: string | null; content_preview: string; line_count: number; version: number }[]>>({});
 
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -177,6 +182,22 @@ export default function Chat({
       setToolUses(t);
       setArtifacts((a as Artifact[]).filter((x) => !x.dup_of));
       setAttachmentsByMsg(attMap);
+      // Group artifacts by message_id for the inline card rendering.
+      const artMap: Record<number, any[]> = {};
+      for (const art of a as any[]) {
+        if (art.dup_of || art.message_id == null) continue;
+        if (!artMap[art.message_id]) artMap[art.message_id] = [];
+        artMap[art.message_id].push({
+          id: art.id,
+          type: art.type,
+          language: art.language ?? null,
+          title: art.title ?? null,
+          content_preview: (art.content || "").slice(0, 220),
+          line_count: (art.content || "").split("\n").length,
+          version: art.version ?? 1,
+        });
+      }
+      setArtifactsByMsg(artMap);
       setError(null);
       setUsage(null);
       setInfo(null);
@@ -345,6 +366,30 @@ export default function Chat({
       if (!isMine(payload)) return;
       const art = payload.artifact ?? payload;
       setArtifacts((cur) => [...cur, art as Artifact]);
+      // Stash a compact preview under the assistant message it came in on.
+      // Server emits `messageId` (camelCase) on the artifact envelope; we
+      // fall back to dropping into the last assistant message if absent.
+      const targetMsgId = (payload.artifactId ?? art?.message_id) ?? null;
+      setArtifactsByMsg((cur) => {
+        const next = { ...cur };
+        const key = targetMsgId != null
+          ? targetMsgId
+          : messagesRef.current.findLast?.((m) => m.role === "assistant")?.id
+            ?? messagesRef.current[messagesRef.current.length - 1]?.id
+            ?? 0;
+        if (!key) return cur;
+        const entry = {
+          id: art.id,
+          type: art.type,
+          language: art.language ?? null,
+          title: art.title ?? null,
+          content_preview: (art.content || "").slice(0, 220),
+          line_count: (art.content || "").split("\n").length,
+          version: art.version ?? 1,
+        };
+        next[key] = [...(next[key] || []).filter((x) => x.id !== entry.id), entry];
+        return next;
+      });
     }
     function onMessageSaved(payload: { messageId: number }) {
       // Re-hydrate from DB so subsequent reloads see the persisted
@@ -646,6 +691,7 @@ export default function Chat({
         messages={messages}
         toolUses={toolUses}
         attachmentsByMsg={attachmentsByMsg}
+        artifactsByMsg={artifactsByMsg}
         streaming={streaming}
         showJump={showJump}
         onScroll={(gap) => setShowJump(gap > 300)}
