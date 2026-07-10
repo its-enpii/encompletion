@@ -314,6 +314,20 @@ io.on('connection', (socket) => {
         effort: effort || process.env.DEFAULT_EFFORT || undefined,
       },
       (evt) => {
+        // Compact one-line summary at the boundaries; per-token text
+        // is captured separately only when we suspect the FE drop.
+        if (evt.type === 'text') {
+          // LLM-runner emits raw text chunks directly; the legacy
+          // Claude CLI runner wraps them in an `assistant` event,
+          // handled below. Forward the text to the client and skip
+          // the assistant-block parser.
+          if (typeof evt.text === 'string' && evt.text.length > 0) {
+            assistantFullText += evt.text;
+            socket.emit('text', { sessionId: dbSession.id, text: evt.text });
+          }
+        } else if (evt.type === 'system' || evt.type === 'result' || evt.type === 'stderr' || evt.type === 'tool_use' || evt.type === 'tool_result' || evt.type === 'error') {
+          process.stderr.write(`[runner ${dbSession.id}] ${evt.type}${evt.subtype ? "/" + evt.subtype : ""} ${evt.errorMessage || evt.message || evt.text || ""}`.trim() + "\n");
+        }
         if (evt.type === 'system' && evt.subtype === 'init') {
           cliSessionId = evt.session_id;
           socket.emit('system', {
