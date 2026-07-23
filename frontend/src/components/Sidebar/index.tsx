@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { authFetch, useAuth } from "@/lib/auth";
 import { useUi } from "@/components/ui/UiProvider";
@@ -14,10 +14,11 @@ import type { Session } from "./types";
 
 export type { Session, Project } from "./types";
 
-const ADMIN_NAV: { href: string; icon: "users" | "cpu"; label: string }[] = [
-  { href: "/users", icon: "users", label: "Users" },
-  { href: "/models", icon: "cpu", label: "Models" },
-];
+// Admin/settings actions moved to UserMenu dropdown (which dispatches
+// admin:open-* events to AdminPanelHost). The sidebar primary nav
+// stays narrow: just Home + Projects, since both are conversation-level
+// destinations. Avoiding admin links here prevents route changes that
+// would close/reopen AppShell's tree and lose sidebar scroll state.
 
 type Props = {
   activeSessionId: number | null;
@@ -62,6 +63,19 @@ export default function Sidebar({
   const [searchDialogOpen, setSearchDialogOpen] = useState(false);
   const [projects, setProjects] = useState<import("./types").Project[]>([]);
 
+  // Preserve scroll position across session-list reloads. The chat view
+  // nudges `refreshKey` after every run completes, which re-fetches the
+  // session list and resets the scroll container back to top — annoying
+  // when you've scrolled deep into "Older" to find a session. We snapshot
+  // scrollTop on every scroll, then restore after the list re-renders.
+  const listScrollRef = useRef<HTMLDivElement | null>(null);
+  const savedScrollTop = useRef(0);
+  // True after the first sessions fetch resolves, even if the array is
+  // empty. We use this to gate the EmptyState so initial paint doesn't
+  // flash "Mulai chat baru" between the empty-init-state and the populated
+  // fetch result — that flash reads as a glitch.
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
+
   // Load projects so the search dialog can label hits by project color/name.
   useEffect(() => {
     authFetch("/api/projects")
@@ -70,28 +84,109 @@ export default function Sidebar({
       .catch(() => {});
   }, []);
 
-  async function load() {
+  // Coalesce rapid refreshKey bumps into a single fetch + render. Chat
+  // emits setSidebarRefresh for every message event during streaming
+  // (and again on done), so without a debounce the sidebar list can
+  // re-render dozens of times per turn — visible as flicker and it
+  // also resets the scrollTop on every re-render. 400ms is short
+  // enough to feel instant for a user-initiated delete/star/rename.
+  const loadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduledLoad = useRef(0);
+  function load() {
+    const myKey = ++scheduledLoad.current;
+    if (loadTimer.current) clearTimeout(loadTimer.current);
+    loadTimer.current = setTimeout(() => { void runLoad(myKey); }, 400);
+  }
+  async function runLoad(scheduledKey: number) {
     try {
-      const data = await authFetch("/api/sessions").then((r) => r.json());
-      setSessions(data);
+      const data = await authFetch("/api/sessions?limit=20").then((r) => r.json());
+      // A newer load() may have been scheduled while this fetch was
+      // in flight — drop our stale result so we don't fight the
+      // most recent render with older data.
+      if (scheduledKey !== scheduledLoad.current) return;
+      setSessionsLoaded(true);
+      // Snapshot scrollTop so we can put it back after React swaps the
+      // list contents. Without this, every refresh tick scrolls the
+      // container back to 0 — clicking a session deep in "Older" loses
+      // your place as soon as the chat nudges refreshKey.
+      const el = listScrollRef.current;
+      if (el) savedScrollTop.current = el.scrollTop;
+      setSessions((cur) => {
+        // Defensive: never blank the list with a malformed/empty
+        // response. The user had 45 sessions, did some action, and the
+        // list dropped to 0 — most likely cause is a transient API hiccup
+        // returning { } or a 4xx body that JSON.parsed to an empty
+        // object. Treat non-arrays as no-op; the next debounced load
+        // will retry the real list.
+        if (!Array.isArray(data)) return cur;
+        // Skip the re-render if the payload is structurally identical
+        // to what we already have. Cheaper than re-rendering the entire
+        // list every time the chat nudges refreshKey, and avoids the
+        // visible blink from React's reconciliation pass.
+        if (cur.length === data.length && cur.every((s, i) => s.id === data[i].id)) {
+          return cur;
+        }
+        return data;
+      });
+      // Restore after the DOM has settled. One rAF is enough — React
+      // commits synchronously after setState in most cases, but the
+      // browser may have invalidated scrollTop during the layout pass.
+      if (el) requestAnimationFrame(() => { el.scrollTop = savedScrollTop.current; });
     } catch {
       /* silent: sidebar shouldn't block UI */
+      setSessionsLoaded(true);
     }
   }
 
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [refreshKey]);
 
+  // Cross-component refresh: Chat (and any other component) dispatches
+  // `app:sessions-changed` after creating a new session or persisting a
+  // message. The sidebar is a sibling under AppShell, so a prop pass
+  // through the layout would have been the alternative — an event keeps
+  // it decoupled and lets the sidebar refresh from anywhere in the tree.
+  useEffect(() => {
+    function onChanged() { load(); }
+    window.addEventListener("app:sessions-changed", onChanged);
+    return () => window.removeEventListener("app:sessions-changed", onChanged);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-scroll the active session into view on first paint. Without
+  // this, opening a chat on a session buried in "Older" leaves you
+  // staring at the top of the list wondering which row is highlighted.
+  // We only do this once (sessionsLoaded transition false→true) so a
+  // re-render after a chat streaming event doesn't keep fighting your
+  // manual scroll.
+  const didAutoScroll = useRef(false);
+  useEffect(() => {
+    if (didAutoScroll.current) return;
+    if (!sessionsLoaded) return;
+    didAutoScroll.current = true;
+    const el = listScrollRef.current;
+    if (!el || activeSessionId == null) return;
+    // Wait one frame so the DOM has rendered the row we want to scroll to.
+    requestAnimationFrame(() => {
+      const row = el.querySelector<HTMLElement>(`[data-session-id="${activeSessionId}"]`);
+      if (!row) return;
+      // Center the active row in the viewport, falling back to nearestEdge
+      // if the row is taller than the container.
+      const rowTop = row.offsetTop;
+      const rowH = row.offsetHeight;
+      const viewH = el.clientHeight;
+      const target = rowTop - Math.max(0, (viewH - rowH) / 2);
+      el.scrollTop = Math.max(0, target);
+    });
+  }, [sessionsLoaded, activeSessionId]);
+
   // Route scope.
   const projectMatch = pathname?.match(/^\/projects\/(\d+)/);
   const currentProjectId = projectMatch ? Number(projectMatch[1]) : null;
   const isProjectsIndex = pathname === "/projects";
-  const isUsersIndex = pathname === "/users";
-  const isModelsIndex = pathname === "/models";
-  const isAdminRoute = isProjectsIndex || isUsersIndex || isModelsIndex;
 
   const scoped: Session[] = currentProjectId
     ? sessions.filter((s) => s.project_id === currentProjectId)
-    : isAdminRoute
+    : isProjectsIndex
       ? []
       : sessions.filter((s) => s.project_id == null);
 
@@ -255,7 +350,7 @@ export default function Sidebar({
             ? ({ "--sb-w": "64px" } as React.CSSProperties)
             : ({ "--sb-w": "280px" } as React.CSSProperties)
         }
-        className={`fixed inset-y-0 left-0 z-40 flex min-w-0 flex-col border-r border-[var(--line-dark)] bg-[var(--dark)] text-[var(--dark-text)] shadow-[var(--shadow-3)] transition-all duration-300 ease-out md:sticky md:top-0 md:h-screen md:translate-x-0 w-[280px] md:w-[var(--sb-w)] ${
+className={`fixed inset-y-0 left-0 z-40 flex min-w-0 flex-col border-r border-[var(--line-dark)] bg-[var(--dark)] text-[var(--dark-text)] shadow-[var(--shadow-3)] transition-[transform,width,opacity] duration-150 ease-out md:sticky md:top-0 md:h-screen md:translate-x-0 w-[280px] md:w-[var(--sb-w)] ${
           // Mobile drawer: open → translate-x-0, closed → -translate-x-full
           open
             ? "translate-x-0"
@@ -275,17 +370,13 @@ export default function Sidebar({
           mode={mode}
         />
 
-        {/* Primary nav — card-like container for visual rhythm */}
+        {/* Primary nav — chat/project destinations only. Admin actions
+            live in the UserMenu dropdown (avatar bottom-left) so they
+            open as overlays without unmounting the sidebar. */}
         <div className={`px-3 pb-3 ${isMini ? "md:px-2" : ""}`}>
           <div className="flex flex-col gap-0.5 rounded-[var(--r-lg)] bg-[var(--dark-2)]/60 p-1.5 ring-1 ring-inset ring-[var(--line-dark)]">
             <NavLink href="/new" icon="home" label="Home" current={pathname === "/new"} onClick={onClose} collapsed={isMini} />
             <NavLink href="/projects" icon="folder" label="Projects" current={pathname?.startsWith("/projects")} onClick={onClose} collapsed={isMini} />
-            {user?.role === "admin" && (
-              <>
-                <NavLink href="/users" icon="users" label="Users" current={pathname === "/users"} onClick={onClose} collapsed={isMini} />
-                <NavLink href="/models" icon="cpu" label="Models" current={pathname === "/models"} onClick={onClose} collapsed={isMini} />
-              </>
-            )}
           </div>
         </div>
 
@@ -309,7 +400,7 @@ export default function Sidebar({
           </button>
         </div>
 
-        {!isAdminRoute && !isMini && (
+        {!isProjectsIndex && !isMini && (
           <>
             {/* Section header */}
             <div className="flex items-center justify-between gap-2 px-5 pb-2">
@@ -385,8 +476,21 @@ export default function Sidebar({
             </div>
 
             {/* Grouped list */}
-            <div className="dark-scroll min-w-0 flex-1 overflow-y-auto px-3 pb-3">
-              {!hasAny ? (
+            <div ref={listScrollRef} className="dark-scroll min-w-0 flex-1 overflow-y-auto px-3 pb-3">
+              {!sessionsLoaded ? (
+                // First-paint skeleton: avoid flashing "Mulai chat baru"
+                // (EmptyState) between the empty init state and the
+                // populated fetch result.
+                <div className="space-y-2 px-1 pt-1">
+                  {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+                    <div
+                      key={i}
+                      className="h-9 rounded-[var(--r-sm)] bg-[var(--dark-3)]/40"
+                      style={{ opacity: 0.4 + i * 0.05 }}
+                    />
+                  ))}
+                </div>
+              ) : !hasAny ? (
                 <EmptyState hasSearch={!!search} hasFilter={filter !== "all"} scoped={currentProjectId != null} onClear={() => { setSearch(""); setFilter("all"); }} />
               ) : (
                 <div className="space-y-4">
@@ -458,9 +562,9 @@ export default function Sidebar({
           </>
         )}
 
-        {isAdminRoute && !isMini && <div className="flex-1" />}
+        {isProjectsIndex && !isMini && <div className="flex-1" />}
 
-        {isAdminRoute && isMini && <div className="flex-1" />}
+        {isProjectsIndex && isMini && <div className="flex-1" />}
 
         {user && (
           <div className={`border-t border-[var(--line-dark)] bg-[var(--dark-2)]/50 ${isMini ? "md:p-1.5" : "p-3"}`}>
@@ -494,7 +598,7 @@ function NavLink({
   collapsed,
 }: {
   href: string;
-  icon: "home" | "folder" | "users" | "cpu";
+  icon: "home" | "folder";
   label: string;
   current?: boolean;
   onClick?: () => void;
@@ -523,8 +627,6 @@ function NavLink({
       >
         {icon === "home" && <HomeIcon className="h-3.5 w-3.5" />}
         {icon === "folder" && <FolderIcon className="h-3.5 w-3.5" />}
-        {icon === "users" && <UsersIcon className="h-3.5 w-3.5" />}
-        {icon === "cpu" && <CpuIcon className="h-3.5 w-3.5" />}
       </span>
       <span className={`flex-1 font-medium ${collapsed ? "md:hidden" : ""}`}>{label}</span>
       {current && (
@@ -690,38 +792,12 @@ function FolderIcon(props: React.SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
-function UsersIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-    </svg>
-  );
-}
 function SearchOffIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
       <circle cx="11" cy="11" r="7" />
       <line x1="21" y1="21" x2="16.65" y2="16.65" />
       <line x1="8" y1="8" x2="14" y2="14" />
-    </svg>
-  );
-}
-function CpuIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <rect x="4" y="4" width="16" height="16" rx="2" />
-      <rect x="9" y="9" width="6" height="6" />
-      <line x1="9" y1="1" x2="9" y2="4" />
-      <line x1="15" y1="1" x2="15" y2="4" />
-      <line x1="9" y1="20" x2="9" y2="23" />
-      <line x1="15" y1="20" x2="15" y2="23" />
-      <line x1="20" y1="9" x2="23" y2="9" />
-      <line x1="20" y1="14" x2="23" y2="14" />
-      <line x1="1" y1="9" x2="4" y2="9" />
-      <line x1="1" y1="14" x2="4" y2="14" />
     </svg>
   );
 }

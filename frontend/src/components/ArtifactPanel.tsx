@@ -3,9 +3,11 @@
 import { useState } from "react";
 import ArtifactViewer, { type Artifact } from "./ArtifactViewer";
 import { Button } from "@/components/ui/Button";
+import { authFetch } from "@/lib/auth";
 
 type Props = {
   artifacts: Artifact[];
+  sessionId?: number | null;
   onClose?: () => void;
 };
 
@@ -16,10 +18,45 @@ const TYPE_META: Record<Artifact["type"], { color: string; bg: string }> = {
   svg: { color: "#8B5CF6", bg: "rgba(139,92,246,0.10)" },
   markdown: { color: "var(--ink-2)", bg: "var(--paper-2)" },
   code: { color: "var(--ink-2)", bg: "var(--paper-2)" },
+  csv: { color: "#16A34A", bg: "rgba(22,163,74,0.10)" },
 };
 
-export default function ArtifactPanel({ artifacts, onClose }: Props) {
+export default function ArtifactPanel({ artifacts, sessionId, onClose }: Props) {
   const [activeIdx, setActiveIdx] = useState(0);
+  const [zipBusy, setZipBusy] = useState(false);
+  const [zipError, setZipError] = useState<string | null>(null);
+
+  async function downloadZip() {
+    if (sessionId == null || artifacts.length === 0 || zipBusy) return;
+    setZipBusy(true);
+    setZipError(null);
+    try {
+      // Server-side ZIP includes every artifact (not just the one
+      // currently shown). For partial bundles the route also accepts
+      // ?ids=1,2,3 but the session-wide export is what users want
+      // when they say "give me everything".
+      const r = await authFetch(`/api/sessions/${sessionId}/artifacts.zip`);
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+        throw new Error(err.error || `HTTP ${r.status}`);
+      }
+      const blob = await r.blob();
+      const dispo = r.headers.get("Content-Disposition") || "";
+      const match = /filename="?([^";]+)"?/i.exec(dispo);
+      const filename = match?.[1] || `artifacts-session-${sessionId}.zip`;
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+    } catch (e: any) {
+      setZipError(e?.message || "Gagal membuat ZIP");
+    } finally {
+      setZipBusy(false);
+    }
+  }
   const shellCls =
     "fixed inset-x-0 bottom-0 z-30 flex flex-col border-t border-[var(--line)] bg-[var(--paper-2)] shadow-[0_-8px_32px_-12px_rgba(26,20,16,0.18)] md:static md:inset-auto md:h-auto md:shrink-0 md:border-l md:border-t-0 md:shadow-none";
 
@@ -40,7 +77,7 @@ export default function ArtifactPanel({ artifacts, onClose }: Props) {
     <aside className={`${shellCls} h-[75vh] md:w-[30rem]`}>
       <PanelHeader
         title="Artifacts"
-        subtitle={`${artifacts.length} item`}
+        subtitle={`${artifacts.length} item${artifacts.length === 1 ? "" : "s"}`}
         onClose={onClose}
         accent={
           <span
@@ -50,7 +87,30 @@ export default function ArtifactPanel({ artifacts, onClose }: Props) {
             {artifacts.length}
           </span>
         }
+        actions={
+          sessionId != null && artifacts.length > 0 ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={downloadZip}
+              disabled={zipBusy}
+              title="Download semua artifact sesi ini sebagai .zip"
+            >
+              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              <span className="hidden sm:inline">{zipBusy ? "Membuat…" : "ZIP"}</span>
+            </Button>
+          ) : null
+        }
       />
+      {zipError && (
+        <div className="border-b border-[var(--line)] bg-[var(--danger-50)] px-3 py-2 text-[11px] text-[var(--danger)]">
+          {zipError}
+        </div>
+      )}
 
       {artifacts.length > 1 && (
         <div className="flex shrink-0 gap-1.5 overflow-x-auto border-b border-[var(--line)] bg-[var(--paper-3)] px-2.5 py-2">
@@ -96,11 +156,13 @@ function PanelHeader({
   title,
   subtitle,
   accent,
+  actions,
   onClose,
 }: {
   title: string;
   subtitle?: string;
   accent?: React.ReactNode;
+  actions?: React.ReactNode;
   onClose?: () => void;
 }) {
   return (
@@ -112,7 +174,7 @@ function PanelHeader({
             aria-hidden
           >
             <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polygon points="12 2 22 12 12 22 2 12" />
+              <polygon points="12 2 22 12 2 12" />
             </svg>
           </span>
         )}
@@ -125,14 +187,17 @@ function PanelHeader({
           )}
         </div>
       </div>
-      {onClose && (
-        <Button variant="ghost" size="sm" onClick={onClose} title="Tutup panel">
-          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-            <line x1="6" y1="6" x2="18" y2="18" />
-            <line x1="18" y1="6" x2="6" y2="18" />
-          </svg>
-        </Button>
-      )}
+      <div className="flex shrink-0 items-center gap-1">
+        {actions}
+        {onClose && (
+          <Button variant="ghost" size="sm" onClick={onClose} title="Tutup panel">
+            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <line x1="6" y1="6" x2="18" y2="18" />
+              <line x1="18" y1="6" x2="6" y2="18" />
+            </svg>
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

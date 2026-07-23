@@ -20,6 +20,11 @@ type Props = {
   projects: Project[];
   currentProjectId: number | null;
   onManageSkills: () => void;
+  // Drag-drop target. Called with the native FileList from a drop or
+  // paste event so the parent can upload each file via the existing
+  // /api/attachments pipeline. Composer still calls onAttach (which
+  // opens the file picker) for the toolbar Attach button.
+  onFiles: (files: FileList) => void;
 };
 
 export function Composer({
@@ -35,8 +40,14 @@ export function Composer({
   projects,
   currentProjectId,
   onManageSkills,
+  onFiles,
 }: Props) {
   const taRef = useRef<HTMLTextAreaElement | null>(null);
+  // Local drag state — only the composer wrapper reacts to dragover/
+  // dragleave so the page-level overlay (in Chat/index.tsx) handles
+  // drops outside the composer box.
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
 
   useEffect(() => {
     const ta = taRef.current;
@@ -47,8 +58,34 @@ export function Composer({
     ta.style.overflowY = ta.scrollHeight > max ? "auto" : "hidden";
   }, [value]);
 
-  const canSend = !streaming && value.trim().length > 0;
+  const canSend = !streaming && (value.trim().length > 0 || pendingAtts.length > 0);
   const charCount = value.length;
+
+  function onDragEnter(e: React.DragEvent) {
+    if (streaming) return;
+    if (!e.dataTransfer?.types?.includes("Files")) return;
+    dragDepth.current += 1;
+    setDragging(true);
+  }
+  function onDragLeave() {
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragging(false);
+  }
+  function onDragOver(e: React.DragEvent) {
+    // Required so `drop` fires — without preventDefault the browser
+    // treats the composer as a non-drop target and opens the file in
+    // the tab instead of handing the FileList to our handler.
+    if (streaming) return;
+    if (!e.dataTransfer?.types?.includes("Files")) return;
+    e.preventDefault();
+  }
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault();
+    dragDepth.current = 0;
+    setDragging(false);
+    const files = e.dataTransfer?.files;
+    if (files && files.length > 0) onFiles(files);
+  }
 
   return (
     <div className="border-t border-[var(--line)] bg-gradient-to-t from-[var(--paper-2)] to-[var(--paper)] px-3 pb-4 pt-3">
@@ -65,7 +102,25 @@ export function Composer({
           </div>
         )}
 
-        <div className="group/composer relative overflow-hidden rounded-[22px] border border-[var(--line)] bg-[var(--paper-3)] shadow-[var(--shadow-2)] transition-[box-shadow,border-color] duration-150 focus-within:border-[var(--magenta-300)] focus-within:shadow-[0_0_0_3px_rgba(168,71,129,0.14)]">
+        <div
+          className={`group/composer relative overflow-hidden rounded-[22px] border bg-[var(--paper-3)] shadow-[var(--shadow-2)] transition-[box-shadow,border-color] duration-150 focus-within:border-[var(--magenta-300)] focus-within:shadow-[0_0_0_3px_rgba(168,71,129,0.14)] ${
+            dragging
+              ? "border-[var(--magenta)] shadow-[0_0_0_3px_rgba(168,71,129,0.18)]"
+              : "border-[var(--line)]"
+          }`}
+          onDragEnter={onDragEnter}
+          onDragLeave={onDragLeave}
+          onDragOver={onDragOver}
+          onDrop={onDrop}
+        >
+          {dragging && (
+            <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-[22px] bg-[var(--magenta-50)]/85 backdrop-blur-[1px]">
+              <div className="flex items-center gap-2 rounded-full border border-[var(--magenta)] bg-[var(--paper-3)] px-3 py-1.5 text-xs font-medium text-[var(--magenta-700)] shadow-[var(--shadow-2)]">
+                <PaperclipIcon className="h-3.5 w-3.5" />
+                Drop files to attach
+              </div>
+            </div>
+          )}
           <div className="relative">
             <textarea
               ref={taRef}
@@ -76,6 +131,26 @@ export function Composer({
                   e.preventDefault();
                   if (canSend) onSend();
                 }
+              }}
+              onPaste={(e) => {
+                // Paste a screenshot from the clipboard directly as an
+                // attachment. Plain text pastes go through the default
+                // handler so the user's existing copy-paste flow stays
+                // intact.
+                const items = e.clipboardData?.items;
+                if (!items) return;
+                const files: File[] = [];
+                for (const it of Array.from(items)) {
+                  if (it.kind === "file") {
+                    const f = it.getAsFile();
+                    if (f) files.push(f);
+                  }
+                }
+                if (files.length === 0) return;
+                e.preventDefault();
+                const dt = new DataTransfer();
+                for (const f of files) dt.items.add(f);
+                onFiles(dt.files);
               }}
               placeholder={streaming ? "Sedang berpikir…" : "Tulis pesan… tekan Enter untuk kirim, Shift+Enter untuk baris baru"}
               rows={1}

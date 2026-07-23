@@ -13,10 +13,12 @@ export function MessageBubble({
   msg,
   sessionId,
   onRegenerate,
+  attachments,
 }: {
   msg: Msg;
   sessionId: number | null;
   onRegenerate?: () => void;
+  attachments?: { file_name: string }[];
 }) {
   const isUser = msg.role === "user";
   const [hovered, setHovered] = useState(false);
@@ -88,14 +90,18 @@ export function MessageBubble({
       {isUser ? (
         <div className="flex justify-end">
           <div className="relative max-w-[80%]">
-            <div className="overflow-hidden rounded-[20px] rounded-br-md bg-gradient-to-br from-[var(--magenta-500)] to-[var(--magenta-700)] px-4 py-3 text-[14px] leading-relaxed text-white shadow-[0_2px_8px_rgba(168,71,129,0.25),inset_0_1px_0_rgba(255,255,255,0.15)]">
-              <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-              {msg.content ? (
+            {msg.content ? (
+              <div className="overflow-hidden rounded-[20px] rounded-br-md bg-gradient-to-br from-[var(--magenta-500)] to-[var(--magenta-700)] px-4 py-3 text-[14px] leading-relaxed text-white shadow-[0_2px_8px_rgba(168,71,129,0.25),inset_0_1px_0_rgba(255,255,255,0.15)]">
+                <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
                 <div className="whitespace-pre-wrap break-words">{msg.content}</div>
-              ) : (
+              </div>
+            ) : !attachments || attachments.length === 0 ? (
+              // Pure-typing stream with no body yet.
+              <div className="overflow-hidden rounded-[20px] rounded-br-md bg-gradient-to-br from-[var(--magenta-500)] to-[var(--magenta-700)] px-4 py-3 text-[14px] leading-relaxed text-white shadow-[0_2px_8px_rgba(168,71,129,0.25),inset_0_1px_0_rgba(255,255,255,0.15)]">
+                <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
                 <StreamingIndicator tone="user" />
-              )}
-            </div>
+              </div>
+            ) : null}
             {/* User avatar indicator */}
             <div className="absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full bg-[var(--paper-3)] ring-2 ring-[var(--paper)] shadow-[var(--shadow-1)]">
               <span className="text-[10px] font-bold text-[var(--magenta-600)]">U</span>
@@ -182,7 +188,14 @@ export function MessageBubble({
               {msg.content ? (
                 <MarkdownView content={msg.content} />
               ) : (
-                <StreamingIndicator tone="assistant" />
+                // No text yet — engine is producing its first token or
+                // running tools. Show the streaming dots in-place so the
+                // user sees one bubble (avatar row + body) instead of
+                // a phantom second pill at the bottom of the thread.
+                <div className="flex items-center gap-2 text-xs text-[var(--ink-3)]">
+                  <StreamingIndicator tone="assistant" />
+                  <span>Sedang berpikir…</span>
+                </div>
               )}
             </div>
           </div>

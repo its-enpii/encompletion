@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/Button";
 export type Artifact = {
   id: number;
   session_id: number;
-  type: "html" | "jsx" | "react" | "svg" | "markdown" | "code";
+  type: "html" | "jsx" | "react" | "svg" | "markdown" | "code" | "csv";
   language: string | null;
   title: string | null;
   content: string;
@@ -21,11 +21,12 @@ type Props = {
 
 const TYPE_META: Record<Artifact["type"], { icon: React.ReactNode; label: string; color: string; bg: string }> = {
   html: { icon: <HtmlIcon />, label: "HTML", color: "var(--saffron-700)", bg: "var(--saffron-50)" },
-  jsx: { icon: <CodeIcon />, label: "JSX", color: "#0EA5E9", bg: "rgba(14,165,233,0.10)" },
+  jsx: { icon: <CodeIcon />, label: "JSX", color: "#0EA5E9", bg: "rgba(14,165,229,0.10)" },
   react: { icon: <ReactIcon />, label: "React", color: "#06B6D4", bg: "rgba(6,182,212,0.10)" },
   svg: { icon: <SvgIcon />, label: "SVG", color: "#8B5CF6", bg: "rgba(139,92,246,0.10)" },
   markdown: { icon: <MarkdownIcon />, label: "Markdown", color: "var(--ink-2)", bg: "var(--paper-2)" },
   code: { icon: <CodeIcon />, label: "Code", color: "var(--ink-2)", bg: "var(--paper-2)" },
+  csv: { icon: <CodeIcon />, label: "CSV", color: "#16A34A", bg: "rgba(22,163,74,0.10)" },
 };
 
 export default function ArtifactViewer({ artifact }: Props) {
@@ -256,6 +257,13 @@ function RenderedArtifact({ artifact }: { artifact: Artifact }) {
       </div>
     );
   }
+  if (artifact.type === "csv") {
+    return (
+      <div className="bg-[var(--paper-2)] p-3">
+        <CsvTablePanel content={artifact.content} />
+      </div>
+    );
+  }
   return (
     <div className="bg-[var(--paper-2)] p-4">
       <pre className="m-0 whitespace-pre-wrap font-mono text-[12px] leading-[1.65] text-[var(--ink)]">
@@ -263,6 +271,88 @@ function RenderedArtifact({ artifact }: { artifact: Artifact }) {
       </pre>
     </div>
   );
+}
+
+// Local CSV table renderer for the side panel. Same parser shape as
+// the dialog version so behaviour is consistent; only the chrome
+// differs (no card frame, fits the panel's narrower width).
+function CsvTablePanel({ content }: { content: string }) {
+  const MAX = 200;
+  const rows = parseCsvLocal(content, MAX);
+  if (rows.length === 0) {
+    return (
+      <div className="rounded border border-[var(--line)] bg-[var(--paper)] p-3 text-[12px] text-[var(--ink-3)]">
+        CSV kosong atau tidak dapat di-parse.
+      </div>
+    );
+  }
+  const [header, ...body] = rows;
+  return (
+    <div className="max-h-[60vh] overflow-auto rounded border border-[var(--line)] bg-[var(--paper)]">
+      <table className="w-full border-collapse text-[12px] leading-[1.5]">
+        <thead className="sticky top-0 z-10 bg-[var(--paper-3)] text-left">
+          <tr>
+            {header.map((c, i) => (
+              <th key={i} className="border-b border-[var(--line)] px-2.5 py-1.5 font-semibold text-[var(--ink)]">{c}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {body.map((row, ri) => (
+            <tr key={ri} className={ri % 2 === 0 ? "" : "bg-[var(--paper-2)]/40"}>
+              {row.map((c, ci) => (
+                <td key={ci} className="border-b border-[var(--line)] px-2.5 py-1 align-top text-[var(--ink)]">{c}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {body.length === MAX - 1 && (
+        <div className="border-t border-[var(--line)] bg-[var(--paper-3)] px-2.5 py-1 text-[10px] text-[var(--ink-3)]">
+          Preview terbatas ke {MAX} baris pertama.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Minimal RFC 4180-ish CSV parser shared by both the dialog and the
+// panel. Avoids the import-tax of pulling in a dep for ~50 lines.
+function parseCsvLocal(text: string, maxRows = 1000): string[][] {
+  if (!text) return [];
+  const out: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let inQuotes = false;
+  let i = 0;
+  const HARD_CAP = 4 * 1024 * 1024;
+  const src = text.length > HARD_CAP ? text.slice(0, HARD_CAP) : text;
+  while (i < src.length) {
+    const c = src[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (src[i + 1] === '"') { field += '"'; i += 2; continue; }
+        inQuotes = false; i++; continue;
+      }
+      field += c; i++; continue;
+    }
+    if (c === '"') { inQuotes = true; i++; continue; }
+    if (c === ",") { row.push(field); field = ""; i++; continue; }
+    if (c === "\r" || c === "\n") {
+      row.push(field); field = "";
+      out.push(row); row = [];
+      i++;
+      if (c === "\r" && src[i] === "\n") i++;
+      if (out.length >= maxRows) return out;
+      continue;
+    }
+    field += c; i++;
+  }
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    out.push(row);
+  }
+  return out;
 }
 
 function htmlShell(code: string, isTs = false) {

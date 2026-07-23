@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import Sidebar from "@/components/Sidebar";
+import { AdminPanelHost } from "@/components/AdminPanel/AdminPanelHost";
 
 const SIDEBAR_MODE_KEY = "app-shell:sidebar-mode";
 type SidebarMode = "full" | "mini" | "hidden";
@@ -136,6 +137,11 @@ export function AppShell({
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {children}
       </main>
+      {/* Admin overlays — render nothing until dispatched via window
+          events from UserMenu. Lives in AppShell so it stays mounted
+          across navigations; AdminPanelHost closes itself on route
+          change. */}
+      <AdminPanelHost />
     </div>
   );
 }

@@ -19,6 +19,24 @@ type Knowledge = {
   created_at: string;
 };
 
+type ProjectFact = {
+  id: number;
+  project_id: number;
+  key: string;
+  value: string;
+  source: "manual" | "auto";
+  created_at: string;
+  updated_at: string;
+};
+
+// Same regex the backend enforces (memory.js + project_memory.js).
+// Mirror here so the user gets inline feedback before hitting the
+// 400 round-trip. Letters/digits/underscore/dash, ≤ 40 chars,
+// leading letter.
+const FACT_KEY_RE = /^[a-zA-Z][a-zA-Z0-9_-]{0,39}$/;
+const MAX_FACT_VALUE_LEN = 2000;
+const MAX_FACTS_PER_PROJECT = 100;
+
 type Project = {
   id: number;
   name: string;
@@ -61,6 +79,16 @@ export default function ProjectConfigPanel({ projectId }: Props) {
   const [knTitle, setKnTitle] = useState("");
   const [knType, setKnType] = useState<"text" | "file">("text");
   const [knContent, setKnContent] = useState("");
+
+  // Project memory facts (Phase 5) — key/value list auto-injected
+  // into the system prompt for every chat in this project. Mirrors
+  // the /api/memory UX shape but scoped to project.
+  const [facts, setFacts] = useState<ProjectFact[]>([]);
+  const [showFactForm, setShowFactForm] = useState(false);
+  const [factKey, setFactKey] = useState("");
+  const [factValue, setFactValue] = useState("");
+  const [factSaving, setFactSaving] = useState(false);
+  const [factError, setFactError] = useState<string | null>(null);
   // Staged file upload for knowledge rows. We POST via two steps:
   // (1) PUT /api/attachments to push the bytes to STORAGE_PATH, then
   // (2) POST /api/projects/:id/knowledge referencing the returned
@@ -76,9 +104,10 @@ export default function ProjectConfigPanel({ projectId }: Props) {
   async function load() {
     setLoading(true);
     try {
-      const [data, skillsData] = await Promise.all([
+      const [data, skillsData, factsData] = await Promise.all([
         authFetch(`/api/projects/${projectId}`).then((r) => r.json()),
         authFetch("/api/skills").then((r) => r.json()).catch(() => ({ skills: [] })),
+        authFetch(`/api/projects/${projectId}/facts`).then((r) => r.json()).catch(() => ({ facts: [] })),
       ]);
       setProject(data.project);
       setKnowledge(data.knowledge || []);
@@ -98,6 +127,10 @@ export default function ProjectConfigPanel({ projectId }: Props) {
       setAllSkills(
         sk.map((s: any) => ({ name: s.name, description: s.description ?? null }))
       );
+      // Project facts — fail closed (empty list) if the endpoint
+      // returned non-200; UI shows "Belum ada fact" in that case.
+      const fl = Array.isArray(factsData?.facts) ? factsData.facts : [];
+      setFacts(fl);
       setMetaDirty(false);
     } finally {
       setLoading(false);
@@ -218,6 +251,63 @@ export default function ProjectConfigPanel({ projectId }: Props) {
     });
     if (!ok) return;
     await authFetch(`/api/projects/${projectId}/knowledge/${kid}`, { method: "DELETE" });
+    load();
+  }
+
+  // Project facts (Phase 5) — POST/PUT/DELETE /api/projects/:id/facts.
+  // PUT semantics: same key upserts; we use PUT here for both create
+  // and edit so the user never sees a different button. Validation
+  // mirrors the backend (FACT_KEY_RE + max length + cap) so the user
+  // gets fast inline feedback.
+  async function saveFact() {
+    const k = factKey.trim();
+    const v = factValue.trim();
+    setFactError(null);
+    if (!FACT_KEY_RE.test(k)) {
+      setFactError("key harus alphanumeric (huruf/angka/_/-), ≤ 40 char, mulai huruf");
+      return;
+    }
+    if (v.length === 0) {
+      setFactError("value wajib diisi");
+      return;
+    }
+    if (v.length > MAX_FACT_VALUE_LEN) {
+      setFactError(`value max ${MAX_FACT_VALUE_LEN} char`);
+      return;
+    }
+    if (facts.length >= MAX_FACTS_PER_PROJECT && !facts.some((f) => f.key === k)) {
+      setFactError(`max ${MAX_FACTS_PER_PROJECT} facts per project`);
+      return;
+    }
+    setFactSaving(true);
+    try {
+      const res = await authFetch(`/api/projects/${projectId}/facts/${encodeURIComponent(k)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: v }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || `HTTP ${res.status}`);
+      }
+      setFactKey(""); setFactValue(""); setShowFactForm(false);
+      await load();
+    } catch (e: any) {
+      setFactError(e?.message || "save failed");
+    } finally {
+      setFactSaving(false);
+    }
+  }
+
+  async function deleteFact(fid: number) {
+    const ok = await confirm({
+      title: "Hapus fact",
+      message: "Fact ini akan dihapus dari project.",
+      confirmLabel: "Hapus",
+      destructive: true,
+    });
+    if (!ok) return;
+    await authFetch(`/api/projects/${projectId}/facts/${fid}`, { method: "DELETE" });
     load();
   }
 
@@ -537,6 +627,135 @@ export default function ProjectConfigPanel({ projectId }: Props) {
           )}
         </Section>
 
+        {/* Project facts (Phase 5) — key/value list auto-injected into
+            the system prompt for every chat in this project. Same
+            shape as /api/memory but scoped to project_id. Cap badge
+            mirrors the memory page. Cap is enforced server-side;
+            this UI is just a heads-up. */}
+        <Section
+          title="Project facts"
+          subtitle={
+            facts.length >= MAX_FACTS_PER_PROJECT
+              ? `cap reached (${MAX_FACTS_PER_PROJECT})`
+              : `${facts.length} / ${MAX_FACTS_PER_PROJECT} injected to system prompt`
+          }
+          icon="cpu"
+          accent="saffron"
+          action={
+            <Button
+              variant={showFactForm ? "ghost" : "primary"}
+              size="sm"
+              onClick={() => { setShowFactForm((v) => !v); setFactError(null); }}
+              disabled={facts.length >= MAX_FACTS_PER_PROJECT && !showFactForm}
+            >
+              {showFactForm ? "Cancel" : (
+                <>
+                  <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                  Add
+                </>
+              )}
+            </Button>
+          }
+        >
+          {showFactForm && (
+            <Card className="mb-3 overflow-hidden">
+              <div className="border-b border-[var(--line)] bg-[var(--paper-2)] px-4 py-2">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--ink-3)]">
+                  Tambah fact
+                </div>
+              </div>
+              <div className="space-y-3 px-4 py-3">
+                <div>
+                  <label className="label mb-1.5 block">Key</label>
+                  <input
+                    type="text"
+                    value={factKey}
+                    onChange={(e) => setFactKey(e.target.value)}
+                    placeholder="e.g. stack, db, owner"
+                    maxLength={40}
+                    className="block w-full rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-3)] px-3 py-2 font-mono text-xs text-[var(--ink)] placeholder:text-[var(--ink-3)] focus:border-[var(--magenta)] focus:outline-none focus:ring-2 focus:ring-[var(--magenta)]/15"
+                  />
+                  <p className="mt-1 text-[11px] text-[var(--ink-3)]">
+                    Huruf/angka/underscore/dash, ≤ 40 char, mulai huruf.
+                  </p>
+                </div>
+                <div>
+                  <label className="label mb-1.5 block">Value</label>
+                  <textarea
+                    value={factValue}
+                    onChange={(e) => setFactValue(e.target.value)}
+                    placeholder="e.g. Laravel 11, postgres, alice@acme.com"
+                    rows={3}
+                    maxLength={MAX_FACT_VALUE_LEN}
+                    className="block w-full rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-3)] px-3 py-2 text-sm leading-relaxed text-[var(--ink)] placeholder:text-[var(--ink-3)] focus:border-[var(--magenta)] focus:outline-none focus:ring-2 focus:ring-[var(--magenta)]/15"
+                  />
+                  <div className="mt-1 flex justify-end">
+                    <CharPill value={factValue.length} max={MAX_FACT_VALUE_LEN} warn={factValue.length > MAX_FACT_VALUE_LEN} />
+                  </div>
+                </div>
+                {factError && (
+                  <div className="text-xs text-[var(--danger)]">{factError}</div>
+                )}
+                <div className="flex justify-end gap-2 pt-1">
+                  <Button variant="ghost" size="sm" onClick={() => { setShowFactForm(false); setFactError(null); }}>
+                    Cancel
+                  </Button>
+                  <Button variant="primary" size="sm" onClick={saveFact} disabled={factSaving || !factKey.trim() || !factValue.trim()}>
+                    <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                    Save
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {facts.length === 0 ? (
+            <div className="rounded-[var(--r-md)] border border-dashed border-[var(--line-strong)] bg-[var(--paper-2)]/60 px-3 py-6 text-center">
+              <p className="text-xs font-medium text-[var(--ink-2)]">Belum ada fact</p>
+              <p className="mt-0.5 text-[11px] text-[var(--ink-3)]">
+                Klik "Add" untuk menambahkan key/value yang akan di-inject ke system prompt.
+              </p>
+            </div>
+          ) : (
+            <ul className="space-y-1.5">
+              {facts.map((f) => (
+                <li
+                  key={f.id}
+                  className="group/fact group flex items-start gap-2.5 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-3)] p-2.5 transition-all hover:border-[var(--line-strong)] hover:shadow-[var(--shadow-1)]"
+                >
+                  <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-[var(--r-sm)] bg-[var(--saffron-50)] text-[var(--saffron-500)]" aria-hidden>
+                    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+                    </svg>
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <code className="rounded bg-[var(--paper-2)] px-1.5 py-0.5 font-mono text-[11px] text-[var(--ink-2)]">{f.key}</code>
+                      {f.source === "auto" && <Pill tone="neutral">[auto]</Pill>}
+                    </div>
+                    <div className="mt-1 line-clamp-3 whitespace-pre-wrap text-xs text-[var(--ink-2)]">{f.value}</div>
+                  </div>
+                  <button
+                    onClick={() => deleteFact(f.id)}
+                    className="shrink-0 rounded-[var(--r-sm)] p-1 text-[var(--ink-3)] opacity-0 transition-all hover:bg-[var(--danger-50)] hover:text-[var(--danger)] group-hover/fact:opacity-100 focus-visible:opacity-100"
+                    aria-label="Delete"
+                  >
+                    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
+                    </svg>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+
         {/* Skills — per-project opt-out. The catalog is global but
             each project can shadow a name here so the LLM never sees
             it (Skill.list and Skill.read return the filtered set
@@ -770,7 +989,7 @@ function Section({
 }: {
   title: string;
   subtitle?: string;
-  icon?: "settings" | "code" | "book" | "zap";
+  icon?: "settings" | "code" | "book" | "zap" | "cpu";
   action?: React.ReactNode;
   accent?: "default" | "saffron";
   headerExtras?: React.ReactNode;
@@ -805,10 +1024,11 @@ function Section({
   );
 }
 
-function SectionIcon({ name, ...props }: { name: "settings" | "code" | "book" | "zap" } & React.SVGProps<SVGSVGElement>) {
+function SectionIcon({ name, ...props }: { name: "settings" | "code" | "book" | "zap" | "cpu" } & React.SVGProps<SVGSVGElement>) {
   if (name === "settings") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>;
   if (name === "code") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" /></svg>;
   if (name === "book") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></svg>;
+  if (name === "cpu") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" /><line x1="9" y1="1" x2="9" y2="4" /><line x1="15" y1="1" x2="15" y2="4" /><line x1="9" y1="20" x2="9" y2="23" /><line x1="15" y1="20" x2="15" y2="23" /><line x1="20" y1="9" x2="23" y2="9" /><line x1="20" y1="14" x2="23" y2="14" /><line x1="1" y1="9" x2="4" y2="9" /><line x1="1" y1="14" x2="4" y2="14" /></svg>;
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>;
 }
 

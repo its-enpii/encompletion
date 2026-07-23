@@ -18,7 +18,10 @@ services:
     networks:
       - claude-net
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4000/api/health"]
+      # Debian base has curl but not wget; node image ships neither.
+      # node -e reaches the in-process HTTP server via the loopback
+      # bind without needing any external binary.
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:4000/api/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -61,6 +64,39 @@ services:
     networks:
       - claude-net
       - web-network
+
+  e2e:
+    # Playwright runner. Container-only — never runs in production.
+    # Mounts ./e2e so test sources sync from the host without rebuilding.
+    # No `restart: unless-stopped` because the runner is one-shot: it
+    # exits after the test suite completes, and `docker compose run`
+    # will recreate the container on the next invocation. Depends on
+    # nginx being healthy so the e2e suite can hit the full stack.
+    build:
+      context: ./e2e
+      dockerfile: Dockerfile
+    container_name: claude-web-e2e
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    networks:
+      - claude-net
+    environment:
+      # Base URL for all tests. The e2e container resolves `nginx` via
+      # the docker network's embedded DNS — same hostname the browser
+      # would see when deployed behind Nginx Proxy Manager.
+      - E2E_BASE_URL=http://nginx:80
+      # Backend reachable directly (bypasses nginx) for fixtures that
+      # need to set up DB rows before the browser logs in.
+      - E2E_BACKEND_URL=http://backend:4000
+    volumes:
+      - ./e2e:/work
+    # Stdout always tty so the runner's progress lines stream in real
+    # time. Without this Compose pipes output through a pty and the
+    # suite feels frozen.
+    tty: true
 
 networks:
   claude-net:

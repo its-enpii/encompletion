@@ -4,23 +4,6 @@ import { requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Broadcast helper — emits `models:updated` with the current enabled list
-// so chat headers elsewhere can re-fetch / refresh state. Best-effort: if
-// `io` isn't mounted (e.g. during a startup race), skip silently.
-function broadcast(io) {
-  if (!io) return;
-  try {
-    const rows = db
-      .prepare(
-        'SELECT id, key, label, sort_order FROM models WHERE enabled = 1 ORDER BY sort_order ASC, id ASC'
-      )
-      .all();
-    io.emit('models:updated', { models: rows });
-  } catch {
-    /* swallow: broadcast is decorative */
-  }
-}
-
 // All routes require auth (mounted with requireAuth in server.js).
 // GET is open to any authenticated user (their dropdown reads it).
 // Mutations are admin-only.
@@ -116,7 +99,6 @@ router.post('/', requireAdmin, (req, res) => {
     )
     .run(key, label, enabled, sort_order);
   const row = db.prepare('SELECT * FROM models WHERE id = ?').get(info.lastInsertRowid);
-  broadcast(req.app.get('io'));
   res.json(safeRow(row));
 });
 
@@ -175,7 +157,6 @@ router.patch('/:id', requireAdmin, (req, res) => {
   fields.push('updated_at = CURRENT_TIMESTAMP');
   params.push(req.params.id);
   db.prepare(`UPDATE models SET ${fields.join(', ')} WHERE id = ?`).run(...params);
-  broadcast(req.app.get('io'));
   res.json(safeRow(db.prepare('SELECT * FROM models WHERE id = ?').get(req.params.id)));
 });
 
@@ -198,7 +179,6 @@ router.delete('/:id', requireAdmin, (req, res) => {
   db.prepare(
     'UPDATE models SET enabled = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
   ).run(req.params.id);
-  broadcast(req.app.get('io'));
   res.json({ ok: true, soft_deleted: true });
 });
 

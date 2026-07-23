@@ -100,4 +100,38 @@ router.patch('/settings', requireAuth, (req, res) => {
   );
 });
 
+// Per-user system prompt. Read at chat time inside llm-runner.js's
+// resolveSystemPrompt(); NULL/empty means "use the hardcoded default".
+// Cap at 64KB to keep one user from blowing up the message size budget.
+router.get('/system-prompt', requireAuth, (req, res) => {
+  const row = db
+    .prepare('SELECT system_prompt FROM user_settings WHERE user_id = ?')
+    .get(req.user.id);
+  res.json({ system_prompt: row?.system_prompt ?? null });
+});
+
+router.put('/system-prompt', requireAuth, (req, res) => {
+  const raw = req.body?.system_prompt;
+  if (raw !== null && raw !== undefined && typeof raw !== 'string') {
+    return res.status(400).json({ error: 'system_prompt must be a string or null' });
+  }
+  const next = raw == null ? null : raw.trim();
+  if (typeof next === 'string' && next.length > 65536) {
+    return res.status(400).json({ error: 'system_prompt too large (>64KB)' });
+  }
+  const exists = db
+    .prepare('SELECT id FROM user_settings WHERE user_id = ?')
+    .get(req.user.id);
+  if (exists) {
+    db.prepare(
+      'UPDATE user_settings SET system_prompt = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?'
+    ).run(next, req.user.id);
+  } else {
+    db.prepare(
+      'INSERT INTO user_settings (user_id, system_prompt) VALUES (?, ?)'
+    ).run(req.user.id, next);
+  }
+  res.json({ system_prompt: next });
+});
+
 export default router;
