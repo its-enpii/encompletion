@@ -77,7 +77,7 @@ export function MessageList({
       className="relative flex-1 overflow-y-auto bg-[var(--paper)]"
     >
       <div className="mx-auto flex max-w-3xl flex-col gap-7 px-4 py-10">
-        {messages.length === 0 && !streaming && <EmptyHero />}
+        {messages.length === 0 && !streaming && sessionId == null && <EmptyHero />}
         {messages.map((m, idx) => {
           const prev = messages[idx - 1];
           const showAvatar = !prev || prev.role !== m.role || m.role === "user";
@@ -338,13 +338,10 @@ function TextPreview({ att }: { att: Att }) {
 function EmptyHero() {
   return (
     <div className="mx-auto mt-4 flex max-w-2xl flex-col items-center gap-6 text-center anim-fade-in">
-      <div className="relative">
-        <div className="absolute inset-0 animate-pulse rounded-full bg-[var(--saffron)] opacity-20 blur-2xl" />
-        <div className="relative grid h-16 w-16 place-items-center rounded-2xl bg-gradient-to-br from-[var(--saffron-100)] via-[var(--saffron-300)] to-[var(--saffron-500)] text-[var(--ink)] shadow-[inset_0_2px_0_rgba(255,255,255,0.5),0_8px_24px_rgba(232,162,43,0.25)]">
-          <svg viewBox="0 0 24 24" className="h-8 w-8 fill-current">
-            <path d="M12 2 L22 12 L12 22 L2 12 Z" />
-          </svg>
-        </div>
+      <div className="grid h-16 w-16 place-items-center rounded-2xl bg-gradient-to-br from-[var(--saffron-100)] via-[var(--saffron-300)] to-[var(--saffron-500)] text-[var(--ink)] shadow-[inset_0_2px_0_rgba(255,255,255,0.5),0_8px_24px_rgba(232,162,43,0.25)]">
+        <svg viewBox="0 0 24 24" className="h-8 w-8 fill-current">
+          <path d="M12 2 L22 12 L12 22 L2 12 Z" />
+        </svg>
       </div>
 
       <div>

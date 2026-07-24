@@ -63,9 +63,9 @@ export async function runOnce() {
     .prepare(
       `SELECT id, user_id
          FROM sessions
-        WHERE updated_at < datetime('now', ?)
+        WHERE datetime(updated_at) < datetime('now', ?)
           AND (last_memory_extracted_at IS NULL
-               OR last_memory_extracted_at < updated_at)
+               OR datetime(last_memory_extracted_at) < datetime(updated_at))
           AND owner_type = 'user'`
     )
     .all(`-${idleSeconds} seconds`);

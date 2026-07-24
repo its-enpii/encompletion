@@ -384,6 +384,9 @@ router.get('/tenants/:id/analytics', (req, res) => {
   const since = (req.query.since && /^\d{4}-\d{2}-\d{2}/.test(req.query.since))
     ? req.query.since
     : new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+  // Canonicalize the comparison so a date-only `since` matches both
+  // space-format and ISO-format timestamps written by mixed code paths.
+  const sinceTs = since + 'T00:00:00.000Z';
 
   // Totals — sessions, messages, runs, cost. Cost is summed from
   // sessions.total_cost_usd where the session is tenant-owned.
@@ -395,12 +398,12 @@ router.get('/tenants/:id/analytics', (req, res) => {
          (SELECT COUNT(*) FROM messages m
             JOIN sessions s ON s.id = m.session_id
             WHERE s.owner_type = 'tenant' AND s.owner_id = ?
-              AND m.created_at >= ?) AS total_messages,
+              AND datetime(m.created_at) >= datetime(?)) AS total_messages,
          (SELECT COUNT(*) FROM messages m
             JOIN sessions s ON s.id = m.session_id
             WHERE s.owner_type = 'tenant' AND s.owner_id = ?
               AND m.role = 'assistant'
-              AND m.created_at >= ?) AS total_assistant_messages,
+              AND datetime(m.created_at) >= datetime(?)) AS total_assistant_messages,
          (SELECT COALESCE(SUM(total_cost_usd), 0) FROM sessions
             WHERE owner_type = 'tenant' AND owner_id = ?) AS total_cost_usd,
          (SELECT COALESCE(SUM(total_tokens), 0) FROM sessions
@@ -413,7 +416,7 @@ router.get('/tenants/:id/analytics', (req, res) => {
     .prepare(
       `SELECT status, COUNT(*) AS n
          FROM tool_executions
-        WHERE tenant_id = ? AND requested_at >= ?
+        WHERE tenant_id = ? AND datetime(requested_at) >= datetime(?)
         GROUP BY status`
     )
     .all(req.params.id, since);
@@ -426,7 +429,7 @@ router.get('/tenants/:id/analytics', (req, res) => {
       `SELECT t.name AS tool_name, COUNT(*) AS n
          FROM tool_executions te
          LEFT JOIN tools t ON t.id = te.tool_id
-        WHERE te.tenant_id = ? AND te.requested_at >= ?
+        WHERE te.tenant_id = ? AND datetime(te.requested_at) >= datetime(?)
         GROUP BY te.tool_id
         ORDER BY n DESC
         LIMIT 10`
@@ -443,7 +446,7 @@ router.get('/tenants/:id/analytics', (req, res) => {
          FROM messages m
          JOIN sessions s ON s.id = m.session_id
         WHERE s.owner_type = 'tenant' AND s.owner_id = ?
-          AND m.created_at >= ?
+          AND datetime(m.created_at) >= datetime(?)
         GROUP BY day
         ORDER BY day ASC`
     )

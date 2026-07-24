@@ -59,7 +59,8 @@ export async function runOnce() {
         WHERE s.archived_at IS NULL
           AND s.owner_type = 'user'
           AND (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) > ?
-          AND (s.last_compacted_at IS NULL OR s.last_compacted_at < s.updated_at)
+          AND (s.last_compacted_at IS NULL
+               OR datetime(s.last_compacted_at) < datetime(s.updated_at))
         ORDER BY s.updated_at DESC
         LIMIT ?`
     )

@@ -108,6 +108,14 @@ router.get('/', (req, res) => {
   // via `?limit=500` to populate the dialog with a wider net.
   const cap = Math.max(1, Math.min(500, Number(limit) || 50));
 
+  // Hide empty placeholder sessions ("New chat" rows created when the user
+  // lands on /new but never sends a message). They have no messages and
+  // make the sidebar unreadable when a user opens several tabs without
+  // typing. The first-turn error path (test 06) explicitly deletes the
+  // session; this filter is a safety net for other paths that leak the
+  // placeholder into the sidebar.
+  where.push('EXISTS (SELECT 1 FROM messages m WHERE m.session_id = s.id)');
+
   const sql = `
     SELECT s.id, s.project_id, s.user_id, s.title, s.model, s.total_cost_usd, s.total_tokens,
            s.claude_session_id, s.starred, s.created_at, s.updated_at, s.archived_at,
@@ -119,6 +127,34 @@ router.get('/', (req, res) => {
      LIMIT ${cap}
   `;
   res.json(db.prepare(sql).all(...params));
+});
+
+// Count of sessions matching the same filters as GET / (sidebar filter chip
+// uses this to render the total behind a "show more" link without paying
+// for the join + payload of the list endpoint). Cheap — single COUNT(*)
+// against an indexed column, no JOIN.
+router.get('/count', (req, res) => {
+  const { project_id, include_archived } = req.query;
+  const where = [];
+  const params = [];
+  if (project_id !== undefined && project_id !== '') {
+    where.push('s.project_id = ?');
+    params.push(Number(project_id));
+  }
+  if (!include_archived) where.push('s.archived_at IS NULL');
+  const scope = ownedOrAdmin(req.user, 's');
+  where.push('1=1');
+  where.push(scope.sql.replace(/^ AND /, ''));
+  params.push(...scope.params);
+  // Mirror the empty-session filter on GET / so the count endpoint
+  // stays in lock-step with the listing — otherwise the "show more"
+  // link would advertise hidden rows that the user can't see or click
+  // through to (they'd resolve to an empty placeholder).
+  where.push('EXISTS (SELECT 1 FROM messages m WHERE m.session_id = s.id)');
+  const row = db
+    .prepare(`SELECT COUNT(*) AS n FROM sessions s WHERE ${where.join(' AND ')}`)
+    .get(...params);
+  res.json({ total: row.n });
 });
 
 // Create a new session

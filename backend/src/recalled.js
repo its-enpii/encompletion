@@ -28,7 +28,7 @@ const MIN_QUERY_LEN = 12;
 // floor, the recall block grows into a slop list and the model over-
 // reasons on trivia prompts (3 text chats in sequence → runner
 // exhausts max tool-call rounds).
-const MIN_RECALL_SCORE = 0.55;
+const MIN_RECALL_SCORE = 0.45;
 
 export async function renderRecalledContextBlock(userId, query, sessionId = null) {
   if (!userId || typeof query !== 'string') return '';

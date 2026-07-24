@@ -95,7 +95,15 @@ before(() => {
 beforeEach(() => {
   // Default mock so a stray LLM call returns no facts.
   _setExtractorLLMForTests(async () => '{"facts":[]}');
-  // Wipe any prior settings so tests can decide.
+  // Wipe sessions + messages + facts + settings for the test users so
+  // each test starts from a known idle/idle-extracted state. Without
+  // this, the per-test WHERE filter may skip seeded sessions that the
+  // previous test's runOnce has already stamped with
+  // last_memory_extracted_at — making the count assertion unreliable.
+  for (const sid of seededSessionIds.splice(0)) {
+    db.prepare(`DELETE FROM messages WHERE session_id = ?`).run(sid);
+    db.prepare(`DELETE FROM sessions WHERE id = ?`).run(sid);
+  }
   db.prepare(`DELETE FROM user_settings WHERE user_id IN (?, ?)`).run(aliceId, bobId);
   db.prepare(`DELETE FROM user_memory_facts WHERE user_id IN (?, ?)`).run(aliceId, bobId);
 });

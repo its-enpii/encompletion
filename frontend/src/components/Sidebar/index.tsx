@@ -57,6 +57,13 @@ export default function Sidebar({
   const { toast, confirm, prompt } = useUi();
 
   const [sessions, setSessions] = useState<Session[]>([]);
+  // Total count of sessions matching the current scope (project or
+  // standalone). Fetched separately so the sidebar can render a
+  // "show more" hint when more than SIDEBAR_VISIBLE sessions exist
+  // and the rest only lives in the search dialog. Updated alongside
+  // `sessions` so a refresh after a new chat keeps the link accurate.
+  const SIDEBAR_VISIBLE = 20;
+  const [totalCount, setTotalCount] = useState<number>(0);
   const [filter, setFilter] = useState<FilterMode>("all");
   const [search, setSearch] = useState("");
   const [groupBy, setGroupBy] = useState<"recent" | "today" | "older">("recent");
@@ -99,10 +106,22 @@ export default function Sidebar({
   }
   async function runLoad(scheduledKey: number) {
     try {
-      const data = await authFetch("/api/sessions?limit=20").then((r) => r.json());
-      // A newer load() may have been scheduled while this fetch was
-      // in flight — drop our stale result so we don't fight the
-      // most recent render with older data.
+      // Two cheap fetches in parallel: the sidebar list (capped at
+      // SIDEBAR_VISIBLE for fast render) and the total count (so the
+      // "show more" link can hint at how many are hidden). Both share
+      // the same WHERE filters server-side, so they stay consistent.
+      const scopeQs = currentProjectId != null
+        ? `?project_id=${currentProjectId}`
+        : "";
+      const [listRes, countRes] = await Promise.all([
+        authFetch(`/api/sessions${scopeQs ? scopeQs + "&" : "?"}limit=${SIDEBAR_VISIBLE}`),
+        authFetch(`/api/sessions/count${scopeQs}`),
+      ]);
+      const data = await listRes.json();
+      const countJson = await countRes.json().catch(() => ({ total: 0 }));
+      // A newer load() may have been scheduled while these fetches were
+      // in flight — drop our stale result so we don't fight the most
+      // recent render with older data.
       if (scheduledKey !== scheduledLoad.current) return;
       setSessionsLoaded(true);
       // Snapshot scrollTop so we can put it back after React swaps the
@@ -128,6 +147,7 @@ export default function Sidebar({
         }
         return data;
       });
+      setTotalCount(Number(countJson?.total) || 0);
       // Restore after the DOM has settled. One rAF is enough — React
       // commits synchronously after setState in most cases, but the
       // browser may have invalidated scrollTop during the layout pass.
@@ -190,8 +210,13 @@ export default function Sidebar({
       ? []
       : sessions.filter((s) => s.project_id == null);
 
-  // Filtering + grouping.
-  const { grouped, totalCount, starredCount, starredList } = useMemo(() => {
+  // Filtering + grouping. The outer `totalCount` (server-supplied count
+  // for the "show more" link) is named `sidebarTotalCount` here to avoid
+  // shadowing — the useMemo's `total` is the in-memory session list size
+  // for the active scope, which differs (sidebar renders only the latest
+  // SIDEBAR_VISIBLE while the server count reflects everything matching
+  // the filters). Keep both, but disambiguate.
+  const { grouped, total: visibleCount, starredCount, starredList } = useMemo(() => {
     const total = scoped.length;
     // Normalize starred to a strict boolean — backend may return 0/1 ints,
     // JSON.parse may yield numbers, optimistic toggle may set 0/1. Treat any
@@ -239,7 +264,7 @@ export default function Sidebar({
 
     return {
       grouped: { today, thisWeek, older },
-      totalCount: total,
+      total,
       starredCount: starredAll.length,
       starredList,
     };
@@ -316,6 +341,14 @@ export default function Sidebar({
   }
 
   const hasAny = grouped.today.length + grouped.thisWeek.length + grouped.older.length > 0;
+
+  // "Show more" affordance: trigger when the server's full count is
+  // greater than what the sidebar renders AND the user isn't already
+  // filtering/searching the visible list (filter would change meaning
+  // of "more"). `hiddenCount` is clamped to 0 in case the count fetch
+  // raced and returned 0 before the list payload landed.
+  const hiddenCount = Math.max(0, totalCount - SIDEBAR_VISIBLE);
+  const hasMore = hiddenCount > 0;
 
   // `mode` is a desktop concept. On mobile, the rail is always rendered as
   // "full" (full label visibility, 280px width, no mini-icon-rail collapse)
@@ -559,6 +592,30 @@ className={`fixed inset-y-0 left-0 z-40 flex min-w-0 flex-col border-r border-[v
                 </div>
               )}
             </div>
+
+            {/* "Show more" hint — only when there are more sessions than
+                fit in the visible list AND no active sidebar filter/search
+                (those already narrow the visible subset, so a "more" link
+                would be misleading). Clicking opens the full search dialog
+                which can read up to 500 sessions with LIKE title search. */}
+            {hasMore && !search.trim() && filter === "all" && (
+              <div className="px-3 pb-3">
+                <button
+                  type="button"
+                  onClick={() => setSearchDialogOpen(true)}
+                  className="flex w-full items-center justify-center gap-2 rounded-[var(--r-md)] border border-dashed border-[var(--line-dark)] bg-[var(--dark-2)]/40 px-3 py-2 text-[11px] font-medium text-[var(--dark-text-2)] transition-colors hover:border-[var(--saffron-500)]/40 hover:bg-[var(--dark-3)]/60 hover:text-[var(--dark-text)]"
+                  aria-label="Buka pencarian lengkap untuk melihat semua session"
+                >
+                  <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <circle cx="11" cy="11" r="7" />
+                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                  </svg>
+                  <span>
+                    Show more · {hiddenCount.toLocaleString()} older session{hiddenCount === 1 ? "" : "s"}
+                  </span>
+                </button>
+              </div>
+            )}
           </>
         )}
 
