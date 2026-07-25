@@ -30,20 +30,24 @@ export function AttachmentTile({
   const [expanded, setExpanded] = useState(false);
 
   // Long-text previews collapse by default; toggle to read the rest.
+  // Only apply to text-bearing kinds — for image/* the "text" extracted
+  // from the dataUrl is the full base64 payload (always >1200 chars),
+  // which would surface a useless "show more" button over the image
+  // itself. Same for the generic icon-only preview.
   const TEXT_CAP = 1200;
-  const text = kind.kind === "text" || kind.kind === "code" || kind.kind === "markdown"
-    ? decodeDataUrl(att.content)
-    : "";
-  const truncated = text.length > TEXT_CAP;
+  const text = extractPreviewText(kind, att);
+  const textKinds: Kind["kind"][] = ["markdown", "code", "text", "pdf", "docx", "xlsx"];
+  const canTruncate = textKinds.includes(kind.kind);
+  const truncated = canTruncate && text.length > TEXT_CAP;
   const shownText = truncated && !expanded ? text.slice(0, TEXT_CAP) : text;
 
   return (
     <div
-      className="group/att relative flex w-44 flex-col overflow-hidden rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-3)] shadow-[var(--shadow-1)] transition-all hover:-translate-y-0.5 hover:border-[var(--line-strong)] hover:shadow-[var(--shadow-2)]"
+      className="group/att relative flex w-28 flex-col overflow-hidden rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-3)] shadow-[var(--shadow-1)] transition-all hover:-translate-y-0.5 hover:border-[var(--line-strong)] hover:shadow-[var(--shadow-2)]"
       title={att.file_name}
     >
       {/* Preview area — type-specific */}
-      <div className="relative h-28 w-full overflow-hidden bg-[var(--paper-2)]">
+      <div className="relative h-16 w-full overflow-hidden bg-[var(--paper-2)]">
         {kind.kind === "image" && (
           <img
             src={att.content}
@@ -71,9 +75,14 @@ export function AttachmentTile({
             {shownText}
           </div>
         )}
+        {(kind.kind === "pdf" || kind.kind === "docx" || kind.kind === "xlsx") && (
+          <div className="h-full w-full overflow-hidden p-2 font-mono text-[10px] leading-snug text-[var(--ink-2)]">
+            {shownText || "_(no extractable text — binary only)_"}
+          </div>
+        )}
         {kind.kind === "generic" && (
           <div className="flex h-full w-full items-center justify-center">
-            <KindBadge kind={kind} />
+            <KindBadge kind={kind} preview />
           </div>
         )}
         {truncated && (
@@ -119,6 +128,9 @@ type Kind =
   | { kind: "markdown"; ext: string }
   | { kind: "code"; ext: string; lang: string }
   | { kind: "text"; ext: string }
+  | { kind: "pdf"; ext: string }
+  | { kind: "docx"; ext: string }
+  | { kind: "xlsx"; ext: string }
   | { kind: "generic"; ext: string };
 
 const CODE_EXTS: Record<string, string> = {
@@ -130,25 +142,52 @@ const CODE_EXTS: Record<string, string> = {
   yml: "yaml", toml: "ini", ini: "ini", vue: "html", svelte: "html",
 };
 
+const IMAGE_EXTS = new Set([
+  "png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "svg", "ico", "heic", "heif",
+]);
+
 function classify(att: PendingAtt): Kind {
   const name = att.file_name || "";
   const dot = name.lastIndexOf(".");
   const ext = (dot >= 0 ? name.slice(dot + 1) : "").toLowerCase();
   const mt = (att.mime_type || "").toLowerCase();
 
-  if (mt.startsWith("image/")) return { kind: "image", ext };
+  // Fall back to extension when the browser didn't supply a MIME type
+  // (some OS drag-drop paths leave `file.type` empty). Without this,
+  // a .png / .jpg without a MIME header renders as a generic icon
+  // instead of a thumbnail — confusing because the badge still says
+  // "FILE" while the user clearly attached an image.
+  if (mt.startsWith("image/") || IMAGE_EXTS.has(ext)) return { kind: "image", ext };
   if (ext === "md" || mt === "text/markdown") return { kind: "markdown", ext };
   if (CODE_EXTS[ext]) return { kind: "code", ext, lang: CODE_EXTS[ext] };
   if (mt.startsWith("text/")) return { kind: "text", ext };
+  // Office / PDF — preview the text content that the server extracted
+  // from the binary. Falls through to generic if no content is present.
+  if (ext === "pdf" || mt === "application/pdf") return { kind: "pdf", ext };
+  if (ext === "docx" || mt.includes("wordprocessingml")) return { kind: "docx", ext };
+  if (
+    ext === "xlsx" || ext === "xls" || ext === "csv" ||
+    mt.includes("spreadsheetml") || mt === "application/vnd.ms-excel" ||
+    mt === "text/csv"
+  ) {
+    return { kind: "xlsx", ext };
+  }
 
   return { kind: "generic", ext };
 }
 
 /* ----- Kind badge (footer icon + fallback preview) ----- */
 
-function KindBadge({ kind, compact = false }: { kind: Kind; compact?: boolean }) {
+function KindBadge({ kind, compact = false, preview = false }: { kind: Kind; compact?: boolean; preview?: boolean }) {
   const cfg = badgeConfig(kind);
-  const size = compact ? "h-4 w-4 text-[8px]" : "h-12 w-12 text-base";
+  // preview mode = the big icon shown in the tile's preview area for
+  // generic (non-image / non-text) kinds. Sized so it fits inside the
+  // compact tile preview box without overwhelming it.
+  const size = compact
+    ? "h-4 w-4 text-[8px]"
+    : preview
+      ? "h-8 w-8 text-[11px]"
+      : "h-12 w-12 text-base";
   return (
     <span
       className={`grid shrink-0 place-items-center rounded-[var(--r-sm)] font-bold uppercase tracking-wider ${size}`}
@@ -165,6 +204,9 @@ function badgeConfig(kind: Kind): { bg: string; fg: string; label: string } {
   if (kind.kind === "markdown") return { bg: "var(--magenta-50)", fg: "var(--magenta-700)", label: "MD" };
   if (kind.kind === "code") return { bg: "rgba(14,165,233,0.10)", fg: "#0369A1", label: ".TSX".slice(0, 4) };
   if (kind.kind === "text") return { bg: "var(--ink-2)", fg: "var(--paper)", label: "TXT" };
+  if (kind.kind === "pdf") return { bg: "#FEE2E2", fg: "#B91C1C", label: "PDF" };
+  if (kind.kind === "docx") return { bg: "#DBEAFE", fg: "#1D4ED8", label: "DOCX" };
+  if (kind.kind === "xlsx") return { bg: "#DCFCE7", fg: "#15803D", label: kind.ext.slice(0, 4).toUpperCase() || "XLSX" };
   // generic — show extension badge
   return { bg: "var(--paper-3)", fg: "var(--ink-3)", label: kind.ext.slice(0, 4).toUpperCase() || "FILE" };
 }
@@ -185,6 +227,31 @@ const mdComponents = {
 };
 
 /* ----- Helpers ----- */
+
+function extractPreviewText(kind: Kind, att: PendingAtt): string {
+  const content = att.content;
+  if (!content) return "";
+  // Server-extracted kinds — content is already plain text (from the
+  // POST /api/attachments extractors pipeline). For markdown/text/code
+  // uploads, the server also returns the decoded text under `content`,
+  // not a dataUrl, so we should just use it directly. The dataUrl
+  // fallback below only kicks in for uploads where the server pipeline
+  // didn't run (e.g. upload failed, content not populated).
+  if (
+    kind.kind === "pdf" || kind.kind === "docx" || kind.kind === "xlsx" ||
+    kind.kind === "markdown" || kind.kind === "code" || kind.kind === "text"
+  ) {
+    // If the server already gave us plain text (no data: prefix), use it
+    // verbatim — otherwise fall through to the dataUrl decode path.
+    if (typeof content === "string" && !content.startsWith("data:")) {
+      return content;
+    }
+  }
+  // Fallback: content is a dataUrl (drag-drop with no successful
+  // server upload). Strip prefix + base64-decode for text/* kinds.
+  // Binary kinds don't need text decoding here.
+  return decodeDataUrl(content);
+}
 
 function decodeDataUrl(d?: string): string {
   if (!d) return "";

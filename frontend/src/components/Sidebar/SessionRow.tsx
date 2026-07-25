@@ -66,6 +66,7 @@ export function SessionRow({
 
   return (
     <li
+      data-session-id={s.id}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >

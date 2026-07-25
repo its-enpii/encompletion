@@ -40,8 +40,17 @@ function inferType(lang) {
   if (l === 'jsx' || l === 'react' || l === 'tsx') return 'react';
   if (l === 'svg') return 'svg';
   if (l === 'md' || l === 'markdown') return 'markdown';
+  if (l === 'csv' || l === 'tsv') return 'csv';
   return 'code';
 }
+
+export { inferType as inferArtifactType };
+
+function hashOf(type, content) {
+  return crypto.createHash('sha256').update(`${type}|${content}`).digest('hex').slice(0, 16);
+}
+
+export { hashOf as hashArtifact };
 
 function firstLineTitle(content) {
   const first = content.split('\n', 1)[0].trim();
@@ -52,10 +61,6 @@ function firstLineTitle(content) {
   const m = first.match(/^(?:\/\/|#|--|<!--)\s*(.+?)(?:\s*-->)?$/);
   if (m && m[1].length < 80) return m[1].slice(0, 80);
   return first.slice(0, 80);
-}
-
-function hashOf(type, content) {
-  return crypto.createHash('sha256').update(`${type}|${content}`).digest('hex').slice(0, 16);
 }
 
 /**
@@ -75,22 +80,32 @@ function evaluate(blockStart, lang, content, prevText) {
   const prefix = prevText.slice(lineStart, blockStart);
   if (prefix.trim() !== '') return { keep: false, reason: 'inline' };
 
-  // Look at up to 200 chars BEFORE the opening fence for intent phrases.
+  const type = inferType(lang);
+
+  // Renderable types (html, react, svg, markdown) almost always
+  // represent a substantive output the user wants — drop the phrase
+  // gate so casual prose like "here's a small login form" still
+  // surfaces the artifact. `code` keeps the stricter check below
+  // because it's the type most likely to appear as illustrative
+  // snippets in explanations.
+  if (type !== 'code') {
+    return { keep: true, reason: 'ok' };
+  }
+
+  // For 'code' type, require an explicit signal that this is a
+  // standalone artifact: an intent phrase in the preceding text OR
+  // a header-looking first line. Either is enough — Claude either
+  // introduced the block ("here's a config…") or commented it as a
+  // titled snippet (`// api.js`).
   const window = prevText.slice(Math.max(0, blockStart - 200), blockStart);
   const phraseHit = INTENT_PHRASES.some((rx) => rx.test(window));
-  if (!phraseHit) return { keep: false, reason: 'no_intent_phrase' };
-
-  // For 'code' type (non-renderable), require an extra signal: the title (first
-  // line) must look like a header. Otherwise it's just an inline code reference
-  // that Claude happened to put on its own line.
-  const type = inferType(lang);
   const titleLine = content.split('\n', 1)[0].trim();
   const looksLikeHeader = (
     /^#{1,6}\s+\S/.test(titleLine) ||
     /^(?:\/\/|#|--|<!--)\s*\S/.test(titleLine)
   );
-  if (type === 'code' && !looksLikeHeader) {
-    return { keep: false, reason: 'code_no_header' };
+  if (!phraseHit && !looksLikeHeader) {
+    return { keep: false, reason: 'no_intent_signal' };
   }
 
   return { keep: true, reason: 'ok' };

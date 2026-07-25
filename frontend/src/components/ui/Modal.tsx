@@ -91,9 +91,6 @@ export function CenteredDialog({
       onPointerDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
     >
       <div
         ref={dialogRef}
@@ -104,13 +101,27 @@ export function CenteredDialog({
         className={`card anim-scale-in w-full overflow-hidden ${widthClass} max-h-[90vh] shadow-[var(--shadow-4)] outline-none`}
       >
         {!hideHeader && (title || description) && (
-          <header className="border-b border-[var(--line)] px-6 py-4">
-            {title && (
-              <h2 className="text-base font-semibold tracking-tight text-[var(--ink)]">{title}</h2>
-            )}
-            {description && (
-              <p className="mt-1 text-sm text-[var(--ink-2)]">{description}</p>
-            )}
+          <header className="flex items-start justify-between gap-4 border-b border-[var(--line)] px-6 py-4">
+            <div className="min-w-0 flex-1">
+              {title && (
+                <h2 className="text-base font-semibold tracking-tight text-[var(--ink)]">{title}</h2>
+              )}
+              {description && (
+                <p className="mt-1 text-sm text-[var(--ink-2)]">{description}</p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close dialog"
+              title="Close (Esc)"
+              className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--r-sm)] text-[var(--ink-3)] transition hover:bg-[var(--paper-3)] hover:text-[var(--ink)]"
+            >
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
           </header>
         )}
         <div className="px-6 py-5 overflow-y-auto">{children}</div>

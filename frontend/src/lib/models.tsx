@@ -26,18 +26,21 @@ const ModelsContext = createContext<ModelsCtx>({
   refresh: async () => {},
 });
 
+const POLL_MS = 30_000;
+const BC_NAME = "encompletion:models";
+
 /**
- * Models registry — shared cache + socket subscription.
+ * Models registry — shared cache + polling refresh.
  *
- * One instance mounted at the root providers so the chat header dropdown
- * and the /models admin page both read the same `models` array. When the
- * backend emits `models:updated` (after any admin mutation), every
- * consumer refreshes — keeps multiple tabs in sync without a refetch on
- * every render.
+ * Replaces the previous socket.io `models:updated` subscription with
+ * 30s polling against /api/models. Mutations on the admin page are
+ * infrequent (manual registry edits), so the latency is fine and we
+ * avoid keeping a long-lived socket around just for one push event.
  *
- * Uses authFetch so a 401 (e.g. hitting /models before login or after a
- * token expiry) routes the user back to /login via the standard auth
- * flow instead of bubbling JSON errors into the UI.
+ * Cross-tab sync: when this tab mutates the registry (rare — only the
+ * admin /models page does), it broadcasts on `BC_NAME` so other tabs
+ * refresh immediately instead of waiting up to 30s. Same-origin only;
+ * remote admin on another machine still gets the next poll cycle.
  */
 export function ModelsProvider({ children }: { children: ReactNode }) {
   const [models, setModels] = useState<Model[]>([]);
@@ -59,31 +62,46 @@ export function ModelsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     refresh();
+    const t = setInterval(refresh, POLL_MS);
+    return () => clearInterval(t);
   }, [refresh]);
 
-  // Socket: subscribe to admin-driven updates. We use the global
-  // `socket.io-client` instance if available, else a long-poll fallback
-  // would be needed — but the chat shell already mounts the socket in
-  // `socket.ts`. Import here lazily so SSR doesn't choke on `window`.
+  // Cross-tab nudge: when ANY tab posts to this channel, refresh. Also
+  // post on mount so a freshly-opened tab can request the freshest
+  // snapshot from siblings (who then refresh + broadcast back).
   useEffect(() => {
-    let socket: any = null;
-    let detach: (() => void) | null = null;
-    (async () => {
-      try {
-        const mod = await import("@/lib/socket");
-        socket = mod.getSocket();
-        if (!socket) return;
-        const handler = () => { refresh(); };
-        socket.on("models:updated", handler);
-        detach = () => socket.off("models:updated", handler);
-      } catch {
-        /* socket not wired — refresh-on-mount fallback already in place */
-      }
-    })();
+    if (typeof window === "undefined" || typeof BroadcastChannel === "undefined") return;
+    let bc: BroadcastChannel | null = null;
+    try {
+      bc = new BroadcastChannel(BC_NAME);
+    } catch {
+      return; // some environments disable BC — fall back to polling alone
+    }
+    const onMsg = () => { refresh(); };
+    bc.addEventListener("message", onMsg);
     return () => {
-      if (detach) detach();
+      bc.removeEventListener("message", onMsg);
+      try { bc.close(); } catch { /* ignore */ }
     };
   }, [refresh]);
+
+  // Expose a broadcaster via window so the admin page can ping siblings
+  // immediately after a mutation, instead of waiting for the poll cycle.
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof BroadcastChannel === "undefined") return;
+    const w = window as any;
+    if (typeof w.__encompletionBroadcastModels === "function") return; // already wired
+    w.__encompletionBroadcastModels = () => {
+      try {
+        const bc = new BroadcastChannel(BC_NAME);
+        bc.postMessage("update");
+        bc.close();
+      } catch { /* ignore */ }
+    };
+    return () => {
+      try { delete w.__encompletionBroadcastModels; } catch { /* ignore */ }
+    };
+  }, []);
 
   return (
     <ModelsContext.Provider value={{ models, loading, refresh }}>

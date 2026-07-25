@@ -22,17 +22,67 @@ function safeUser(u) {
   };
 }
 
-// GET /api/users — admin only
-router.get('/', requireAdmin, (_req, res) => {
+// GET /api/users — admin only. Paginated.
+// Query params:
+//   limit  — 1..500, default 50
+//   offset — >=0, default 0
+//   q      — case-insensitive search on username + display_name
+//   sort   — one of: id | username | role | created_at | last_login_at
+//   dir    — 'asc' | 'desc', default asc
+//
+// Response: { users, total, limit, offset }
+//   total — total rows matching the WHERE (not just the page slice),
+//           so the FE can render "Showing X–Y of N" + page counts
+//           without a second roundtrip.
+const SORT_COLS = { id: 'id', username: 'username', role: 'role', created_at: 'created_at', last_login_at: 'last_login_at' };
+router.get('/', requireAdmin, (req, res) => {
+  // Limit: missing/non-numeric/non-positive → 50. Upper-bounded at
+  // 500. We use a single `parseInt(... || ...)` so `limit=0`,
+  // `limit=-5`, and `limit=abc` all collapse to the default rather than
+  // the floor — keeps pagination predictable for fat-fingered URLs.
+  const rawLimit = parseInt(req.query.limit ?? '50', 10);
+  const limit = Number.isFinite(rawLimit) && rawLimit > 0
+    ? Math.min(rawLimit, 500)
+    : 50;
+  const offset = Math.max(parseInt(req.query.offset || '0', 10) || 0, 0);
+  const search = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
+  const sortKey = SORT_COLS[String(req.query.sort || 'id')] || 'id';
+  const sortDir = String(req.query.dir || 'asc').toLowerCase() === 'desc' ? 'DESC' : 'ASC';
+
+  const where = [];
+  const params = [];
+  if (search) {
+    // SQLite reads '' inside COALESCE as an empty quoted identifier,
+    // not a string literal — wrap in single quotes for the column
+    // default. (Empty string cast is fine for our purposes; the
+    // search term rarely matches an empty display_name anyway.)
+    where.push(`(LOWER(username) LIKE ? OR LOWER(COALESCE(display_name, '')) LIKE ?)`);
+    const needle = `%${search}%`;
+    params.push(needle, needle);
+  }
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+  const total = db
+    .prepare(`SELECT COUNT(*) AS n FROM users ${whereSql}`)
+    .get(...params).n;
+
   const rows = db
     .prepare(
       `SELECT id, username, display_name, role, disabled,
               created_at, updated_at, last_login_at
          FROM users
-        ORDER BY id ASC`
+         ${whereSql}
+         ORDER BY ${sortKey} ${sortDir}
+         LIMIT ? OFFSET ?`
     )
-    .all();
-  res.json(rows.map(safeUser));
+    .all(...params, limit, offset);
+
+  res.json({
+    users: rows.map(safeUser),
+    total,
+    limit,
+    offset,
+  });
 });
 
 // POST /api/users — admin only: create new user
