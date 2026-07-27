@@ -44,13 +44,16 @@ jobs:
 
       - name: Deploy to production
         uses: appleboy/ssh-action@v1
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
             set -euo pipefail
-            cd '${{ secrets.DEPLOY_PATH }}'
+            : "${DEPLOY_PATH:?DEPLOY_PATH must be set}"
+            cd "$DEPLOY_PATH"
             git fetch --prune origin
             git reset --hard origin/main
             docker compose pull || true

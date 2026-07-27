@@ -24,13 +24,19 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
       // after success. Encoding the full path with search is safe — both
       // usePathname and the query parser handle arbitrary URLs.
       const next = pathname && pathname !== "/" ? `?next=${encodeURIComponent(pathname)}` : "";
-      router.push(`/login${next}`);
+      router.replace(`/login${next}`);
     } else if (user && pathname === "/login") {
-      router.push("/");
+      router.replace("/");
     }
   }, [user, loading, pathname, router]);
 
-  if (loading) {
+  // Hold the spinner while auth is resolving OR while we're mid-redirect.
+  // Rendering children on the unauthenticated branch is what caused the
+  // brief chat-shell flash before /login mounted.
+  const redirecting =
+    (!user && pathname !== "/login") || (!!user && pathname === "/login");
+
+  if (loading || redirecting) {
     return (
       <div className="grid min-h-screen w-screen place-items-center bg-[var(--paper)]">
         <div className="flex flex-col items-center gap-5">
