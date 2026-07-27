@@ -28,6 +28,7 @@ import { hashArtifact } from "./artifact-detector.js";
 import { renderMemoryFactsBlock } from "./memory.js";
 import { renderRecalledContextBlock } from "./recalled.js";
 import { renderSessionSummaryBlock } from "./summarized.js";
+import { buildTodayContextBlock } from "./persona.js";
 import db from "./db/index.js";
 
 // Chat-web product (Claude/ChatGPT/Gemini style) — not a coding agent.
@@ -303,8 +304,10 @@ export function runLLM(prompt, opts = {}, onEvent) {
   const summaryBlock = opts.sessionId
     ? renderSessionSummaryBlock(opts.sessionId)
     : "";
+  // Fresh clock each turn so "sekarang" / relative dates stay accurate.
+  const nowBlock = buildTodayContextBlock();
   const fullSystemPrompt = (b) =>
-    [memoryBlock, projectMemoryBlock, projectInstructionsBlock, b, summaryBlock]
+    [nowBlock, memoryBlock, projectMemoryBlock, projectInstructionsBlock, b, summaryBlock]
       .filter(Boolean)
       .reduce((acc, block) => acc + "\n\n" + block, systemPrompt);
   const messagesRef = {
