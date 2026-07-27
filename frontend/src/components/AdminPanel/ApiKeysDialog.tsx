@@ -9,6 +9,7 @@ import { CenteredDialog } from "@/components/ui/Modal";
 import {
   ApiKey, CreatedApiKey, copyToClipboard, createApiKey, deleteApiKey, listApiKeys,
 } from "@/lib/api-keys";
+import Dropdown from "@/components/Dropdown";
 
 type Model = { key: string; label: string };
 
@@ -143,24 +144,22 @@ export function ApiKeysDialog({ open, onClose }: { open: boolean; onClose: () =>
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. curl-test"
+                  placeholder="Nama key"
                   maxLength={64}
                   className="input"
                 />
               </label>
               <label className="flex min-w-0 flex-col gap-1 text-xs text-[var(--ink-2)]">
                 Model
-                <select
+                <Dropdown
                   value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  className="input min-w-0 max-w-full"
-                >
-                  {models.map((m) => (
-                    <option key={m.key} value={m.key}>
-                      {m.label} ({m.key})
-                    </option>
-                  ))}
-                </select>
+                  onChange={setModel}
+                  options={models.map((m) => ({
+                    value: m.key,
+                    label: `${m.label} (${m.key})`,
+                  }))}
+                  className="w-full"
+                />
               </label>
               <Button type="submit" variant="primary" disabled={creating || !name.trim() || !model} className="sm:mb-0.5">
                 {creating ? "Membuat…" : "Buat key"}

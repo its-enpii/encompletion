@@ -69,7 +69,7 @@ export function NewProjectDialog({
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
-          placeholder="e.g. SIDBM, Laundry SaaS…"
+          placeholder="Nama project"
           autoFocus
         />
         <TextField

@@ -9,6 +9,7 @@ import { Pill } from "@/components/ui/Pill";
 import { CenteredDialog } from "@/components/ui/Modal";
 import { TextField } from "@/components/ui/TextField";
 import { FullscreenOverlay } from "@/components/ui/FullscreenOverlay";
+import Dropdown from "@/components/Dropdown";
 
 /**
  * Models admin panel — fullscreen overlay. Surfaces the registry
@@ -323,15 +324,13 @@ export function ModelsDialog({ open, onClose }: { open: boolean; onClose: () => 
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <select
+                  <Dropdown
+                    size="sm"
                     value={grantRole}
-                    onChange={(e) => setGrantRole(e.target.value)}
-                    className="rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--paper)] px-2 py-1 text-sm"
-                  >
-                    {roleIds.map((id) => (
-                      <option key={id} value={id}>{id}</option>
-                    ))}
-                  </select>
+                    onChange={setGrantRole}
+                    options={roleIds.map((id) => ({ value: id, label: id }))}
+                    className="w-36"
+                  />
                   <Button variant="primary" size="sm" onClick={saveRoleGrants} disabled={grantBusy}>
                     {grantBusy ? "Menyimpan…" : "Simpan akses"}
                   </Button>
@@ -588,16 +587,16 @@ function ModelDialog({
             label="Key (CLI flag)"
             value={key}
             onChange={(e) => setKey(e.target.value)}
-            placeholder="workspace atau provider/model-name"
+            placeholder="model-key"
             autoFocus
-            hint="Karakter apapun kecuali spasi. Contoh: provider/model-name atau custom.id"
+            hint="Tanpa spasi. Dipakai sebagai flag model ke backend."
           />
         )}
         <TextField
           label="Label (tampil di dropdown)"
           value={label}
           onChange={(e) => setLabel(e.target.value)}
-          placeholder="Workspace"
+          placeholder="Label model"
         />
         <div className="flex items-center gap-4">
           <label className="flex flex-1 items-center gap-2 text-sm text-[var(--ink-2)]">

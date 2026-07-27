@@ -37,7 +37,7 @@ export function BrandMark({
       </span>
       {(showWord && !collapsed) && (
         <span className={`${text} font-semibold tracking-tight ${wordColor}`}>
-          Enpii<span className={`ml-1 font-normal ${subColor}`}>Studio</span>
+          Enpii<span className={`ml-1 font-normal ${subColor}`}>Assist</span>
         </span>
       )}
     </div>

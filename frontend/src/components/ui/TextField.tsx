@@ -20,18 +20,13 @@ type TextareaProps = CommonProps &
     as: "textarea";
   };
 
-type SelectProps = CommonProps &
-  React.SelectHTMLAttributes<HTMLSelectElement> & {
-    as: "select";
-    children: React.ReactNode;
-  };
+// Selects: use Dropdown — native <select> is intentionally not supported here.
+type Props = InputProps | TextareaProps;
 
-type Props = InputProps | TextareaProps | SelectProps;
-
-export const TextField = forwardRef<HTMLInputElement & HTMLTextAreaElement & HTMLSelectElement, Props>(
+export const TextField = forwardRef<HTMLInputElement & HTMLTextAreaElement, Props>(
   function TextField(props, ref) {
     const id = useId();
-    const { label, hint, error, hideLabel = false, ...rest } = props as Props & { as?: "input" | "textarea" | "select" };
+    const { label, hint, error, hideLabel = false, ...rest } = props as Props & { as?: "input" | "textarea" };
     const as = (rest as { as?: string }).as ?? "input";
 
     const labelledProps = label ? { "aria-labelledby": `${id}-label`, id } : {};
@@ -42,13 +37,6 @@ export const TextField = forwardRef<HTMLInputElement & HTMLTextAreaElement & HTM
     if (as === "textarea") {
       const { as: _ignored, ...inputRest } = rest as TextareaProps & { as: "textarea" };
       control = <textarea ref={ref as React.Ref<HTMLTextAreaElement>} className={controlCls} {...labelledProps} {...inputRest} />;
-    } else if (as === "select") {
-      const { as: _ignored, children, ...inputRest } = rest as SelectProps & { as: "select" };
-      control = (
-        <select ref={ref as React.Ref<HTMLSelectElement>} className={controlCls} {...labelledProps} {...inputRest}>
-          {children}
-        </select>
-      );
     } else {
       const { as: _ignored, ...inputRest } = rest as InputProps & { as?: "input" };
       control = <input ref={ref as React.Ref<HTMLInputElement>} className={controlCls} {...labelledProps} {...inputRest} />;

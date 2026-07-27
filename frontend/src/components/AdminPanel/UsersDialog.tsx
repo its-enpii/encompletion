@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/Card";
 import { CenteredDialog } from "@/components/ui/Modal";
 import { TextField } from "@/components/ui/TextField";
 import { FullscreenOverlay } from "@/components/ui/FullscreenOverlay";
+import Dropdown from "@/components/Dropdown";
 
 /**
  * Users admin panel — surfaced as a fullscreen overlay from
@@ -499,15 +500,15 @@ function PaginationFooter({
       <div className="flex items-center gap-3">
         <label className="flex items-center gap-1.5">
           <span>Per page</span>
-          <select
-            value={pageSize}
-            onChange={(e) => onPageSizeChange(Number(e.target.value))}
-            className="rounded-[6px] border border-[var(--line)] bg-[var(--paper)] px-1.5 py-0.5 text-xs"
-          >
-            {[25, 50, 100, 200].map((n) => (
-              <option key={n} value={n}>{n}</option>
-            ))}
-          </select>
+          <Dropdown
+            size="sm"
+            direction="up"
+            value={String(pageSize)}
+            onChange={(v) => onPageSizeChange(Number(v))}
+            options={[25, 50, 100, 200].map((n) => ({ value: String(n), label: String(n) }))}
+            className="w-16"
+            triggerClass="!px-2"
+          />
         </label>
         <div className="flex items-center gap-0.5 rounded-[var(--r-sm)] bg-[var(--paper)] p-0.5 ring-1 ring-inset ring-[var(--line)]">
           <button
@@ -741,11 +742,12 @@ function CreateForm({
       <TextField label="Password (min 12)" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
       <div>
         <label className="label mb-1.5 block">Role</label>
-        <select value={role} onChange={(e) => setRole(e.target.value)} className="input">
-          {roleOptions.map((r) => (
-            <option key={r.id} value={r.id}>{r.label} ({r.id})</option>
-          ))}
-        </select>
+        <Dropdown
+          value={role}
+          onChange={setRole}
+          options={roleOptions.map((r) => ({ value: r.id, label: `${r.label} (${r.id})` }))}
+          className="w-full"
+        />
       </div>
       {err && (
         <div className="rounded-[var(--r-md)] border border-[var(--danger)]/40 bg-[var(--danger-50)] px-3 py-2 text-sm text-[var(--danger)]">
@@ -802,11 +804,13 @@ function EditForm({
       <TextField label="Display name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
       <div>
         <label className="label mb-1.5 block">Role</label>
-        <select value={role} onChange={(e) => setRole(e.target.value)} disabled={isSelf} className="input">
-          {options.map((r) => (
-            <option key={r.id} value={r.id}>{r.label} ({r.id})</option>
-          ))}
-        </select>
+        <Dropdown
+          value={role}
+          onChange={setRole}
+          disabled={isSelf}
+          options={options.map((r) => ({ value: r.id, label: `${r.label} (${r.id})` }))}
+          className="w-full"
+        />
         {isSelf && <p className="mt-1 text-xs text-[var(--ink-3)]">Tidak bisa ubah role sendiri.</p>}
       </div>
       <label className="flex items-center gap-2.5 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-2)] px-3 py-2.5 text-sm">

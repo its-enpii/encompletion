@@ -273,7 +273,7 @@ function CreateRoleForm({
         label="Slug (id)"
         value={id}
         onChange={(e) => setId(e.target.value.toLowerCase())}
-        placeholder="e.g. analyst"
+        placeholder="slug-role"
         autoFocus
       />
       <TextField

@@ -71,7 +71,7 @@ export default function LoginPage() {
         <div className="relative space-y-6">
           <div className="space-y-1">
             <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--saffron-200)]">
-              Encompletion · Web GUI
+              Enpii Assist
             </span>
             <h1 className="text-4xl font-semibold leading-tight tracking-tight">
               Chat langsung dari browser.
@@ -109,7 +109,7 @@ export default function LoginPage() {
             </span>
             <span>Siap dipakai</span>
           </div>
-          <span>Enpii Studio · v1</span>
+          <span>Enpii Assist · v1</span>
         </div>
       </div>
 

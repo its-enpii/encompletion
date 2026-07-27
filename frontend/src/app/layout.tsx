@@ -21,8 +21,8 @@ const jetbrains = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Encompletion",
-  description: "Encompletion: Web",
+  title: "Enpii Assist",
+  description: "Enpii Assist",
 };
 
 export default function RootLayout({

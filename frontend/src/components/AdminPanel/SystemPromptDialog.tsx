@@ -140,7 +140,7 @@ export function SystemPromptDialog({ open, onClose }: { open: boolean; onClose: 
               onChange={(e) => setDraft(e.target.value)}
               rows={12}
               disabled={loading || saving}
-              placeholder={"Kosongkan untuk pakai bawaan.\n\nContoh: 'You are a pirate. Reply in pirate tongue.'"}
+              placeholder="Kosongkan untuk pakai bawaan."
               maxLength={65536}
               className="block w-full resize-y rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper)] p-3 font-mono text-xs leading-relaxed text-[var(--ink)] outline-none focus:border-[var(--magenta-300)]"
             />

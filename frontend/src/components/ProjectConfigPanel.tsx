@@ -358,7 +358,7 @@ export default function ProjectConfigPanel({ projectId }: Props) {
             onChange={(e) => { setName(e.target.value); setMetaDirty(true); }}
             onBlur={saveMeta}
             className="min-w-0 flex-1 bg-transparent text-sm font-semibold tracking-tight text-[var(--ink)] outline-none transition-colors hover:text-[var(--magenta-700)] focus:text-[var(--magenta-700)]"
-            placeholder="Project name…"
+            placeholder="Nama project"
           />
           <span className="rounded-full bg-[var(--paper-2)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--ink-3)] ring-1 ring-inset ring-[var(--line)]">
             #{projectId}
@@ -422,7 +422,7 @@ export default function ProjectConfigPanel({ projectId }: Props) {
               value={description}
               onChange={(e) => { setDescription(e.target.value); setMetaDirty(true); }}
               onBlur={saveMeta}
-              placeholder="e.g. Tools & scripts untuk operasional harian…"
+              placeholder="Deskripsi singkat (opsional)"
               rows={2}
               maxLength={280}
             />
@@ -442,7 +442,7 @@ export default function ProjectConfigPanel({ projectId }: Props) {
             value={instructions}
             onChange={(e) => { setInstructions(e.target.value); setMetaDirty(true); }}
             onBlur={saveMeta}
-            placeholder="Ketik instruksi untuk project ini. Akan di-inject ke system prompt saat session dimulai.&#10;&#10;Contoh: fokus pada PHP/Laravel, selalu jawab dalam Bahasa Indonesia…"
+            placeholder="Instruksi project. Disuntik ke system prompt saat session dimulai."
             rows={7}
             mono
             maxLength={6000}
@@ -487,7 +487,7 @@ export default function ProjectConfigPanel({ projectId }: Props) {
                     type="text"
                     value={knTitle}
                     onChange={(e) => setKnTitle(e.target.value)}
-                    placeholder="e.g. Database schema, API contract…"
+                    placeholder="Judul knowledge"
                     className="block w-full rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-3)] px-3 py-2 text-sm text-[var(--ink)] placeholder:text-[var(--ink-3)] focus:border-[var(--magenta)] focus:outline-none focus:ring-2 focus:ring-[var(--magenta)]/15"
                   />
                 </div>
@@ -674,7 +674,7 @@ export default function ProjectConfigPanel({ projectId }: Props) {
                     type="text"
                     value={factKey}
                     onChange={(e) => setFactKey(e.target.value)}
-                    placeholder="e.g. stack, db, owner"
+                    placeholder="Kunci"
                     maxLength={40}
                     className="block w-full rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-3)] px-3 py-2 font-mono text-xs text-[var(--ink)] placeholder:text-[var(--ink-3)] focus:border-[var(--magenta)] focus:outline-none focus:ring-2 focus:ring-[var(--magenta)]/15"
                   />
@@ -687,7 +687,7 @@ export default function ProjectConfigPanel({ projectId }: Props) {
                   <textarea
                     value={factValue}
                     onChange={(e) => setFactValue(e.target.value)}
-                    placeholder="e.g. Laravel 11, postgres, alice@acme.com"
+                    placeholder="Nilai"
                     rows={3}
                     maxLength={MAX_FACT_VALUE_LEN}
                     className="block w-full rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-3)] px-3 py-2 text-sm leading-relaxed text-[var(--ink)] placeholder:text-[var(--ink-3)] focus:border-[var(--magenta)] focus:outline-none focus:ring-2 focus:ring-[var(--magenta)]/15"

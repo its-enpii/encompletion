@@ -10,6 +10,7 @@ import { ProjectCard, type Project } from "./Card";
 import { NewProjectDialog } from "./NewProjectDialog";
 import { DeleteProjectDialog } from "./DeleteProjectDialog";
 import { EmptyProjectsView } from "./EmptyStateView";
+import { SidebarToggle } from "@/components/SidebarToggle";
 
 type SortKey = "recent" | "name" | "sessions";
 type ViewMode = "grid" | "list";
@@ -97,9 +98,12 @@ export default function ProjectsPage() {
           <div className="mb-8">
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div className="min-w-0 flex-1">
-                <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--magenta-700)]">
-                  <span className="h-px w-6 bg-[var(--magenta-500)]" />
-                  Workspace
+                <div className="mb-2 flex items-center gap-2">
+                  <SidebarToggle />
+                  <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--magenta-700)]">
+                    <span className="h-px w-6 bg-[var(--magenta-500)]" />
+                    Workspace
+                  </span>
                 </div>
                 <div className="flex items-baseline gap-3">
                   <h1 className="text-3xl font-semibold tracking-tight text-[var(--ink)]">

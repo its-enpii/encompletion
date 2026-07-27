@@ -9,6 +9,7 @@ import { Pill } from "@/components/ui/Pill";
 import { TextField } from "@/components/ui/TextField";
 import { CenteredDialog } from "@/components/ui/Modal";
 import { FullscreenOverlay } from "@/components/ui/FullscreenOverlay";
+import Dropdown from "@/components/Dropdown";
 
 /**
  * EmbedAdminDialog — admin-only management surface for embed-mode
@@ -596,29 +597,42 @@ function TenantCreateDialog({
       }
     >
       <div className="space-y-3">
-        <TextField label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="LaundryAja" autoFocus />
+        <TextField label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Nama tenant" autoFocus />
         <TextField
           label="Slug (kebab-case, unik)"
           value={slugTouched ? slug : autoSlug}
           onChange={(e) => { setSlug(e.target.value); setSlugTouched(true); }}
-          placeholder={autoSlug || "laundryaja"}
+          placeholder={autoSlug || "nama-tenant"}
           hint={slugValid ? "✓ valid" : "Format: huruf kecil, angka, dash"}
         />
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="flex min-w-0 flex-col gap-1 text-xs text-[var(--ink-2)]">
             Status
-            <select value={status} onChange={(e) => setStatus(e.target.value as any)} className="input">
-              <option value="active">active</option>
-              <option value="trial">trial</option>
-              <option value="suspended">suspended</option>
-            </select>
+            <Dropdown
+              value={status}
+              onChange={(v) => setStatus(v as "active" | "trial" | "suspended")}
+              options={[
+                { value: "active", label: "active" },
+                { value: "trial", label: "trial" },
+                { value: "suspended", label: "suspended" },
+              ]}
+              className="w-full"
+            />
           </label>
           <label className="flex min-w-0 flex-col gap-1 text-xs text-[var(--ink-2)]">
             Default model
-            <select value={defaultModelId} onChange={(e) => setDefaultModelId(e.target.value)} className="input min-w-0 max-w-full">
-              <option value="">— none —</option>
-              {models.map((m) => <option key={m.id} value={m.id}>{m.label} ({m.key})</option>)}
-            </select>
+            <Dropdown
+              value={defaultModelId}
+              onChange={setDefaultModelId}
+              options={[
+                { value: "", label: "— none —" },
+                ...models.map((m) => ({
+                  value: String(m.id),
+                  label: `${m.label} (${m.key})`,
+                })),
+              ]}
+              className="w-full"
+            />
           </label>
         </div>
 
@@ -631,9 +645,9 @@ function TenantCreateDialog({
         </button>
         {showPersona && (
           <div className="space-y-3 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-2)]/50 p-3">
-            <TextField label="Persona name (bot)" value={personaName} onChange={(e) => setPersonaName(e.target.value)} placeholder="Aira" />
-            <TextField label="Tone" value={personaTone} onChange={(e) => setPersonaTone(e.target.value)} placeholder="friendly, singkat" />
-            <TextField label="Greeting" value={personaGreeting} onChange={(e) => setPersonaGreeting(e.target.value)} placeholder="Halo! Ada yang bisa dibantu?" />
+            <TextField label="Persona name (bot)" value={personaName} onChange={(e) => setPersonaName(e.target.value)} placeholder="Nama bot" />
+            <TextField label="Tone" value={personaTone} onChange={(e) => setPersonaTone(e.target.value)} placeholder="Ramah, singkat" />
+            <TextField label="Greeting" value={personaGreeting} onChange={(e) => setPersonaGreeting(e.target.value)} placeholder="Salam pembuka" />
             <div>
               <label className="label mb-1.5 block">Instructions</label>
               <textarea
@@ -746,9 +760,9 @@ function ApiKeyIssueDialog({
           label="Nama key"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="primary"
+          placeholder="Nama key"
           autoFocus
-          hint="Mis. 'primary', 'staging', 'mobile-app'. Hanya untuk identifikasi internal."
+          hint="Hanya untuk identifikasi internal."
         />
       ) : (
         <div className="space-y-3">

@@ -336,14 +336,14 @@ export function MemoryDialog({ open, onClose }: { open: boolean; onClose: () => 
                   <li className="space-y-2 py-3">
                     <input
                       type="text"
-                      placeholder="key, mis. lokasi atau role"
+                      placeholder="Kunci fakta"
                       value={draftKey}
                       onChange={(e) => setDraftKey(e.target.value)}
                       maxLength={40}
                       className="block w-full rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper)] p-2 font-mono text-xs text-[var(--ink)] outline-none focus:border-[var(--magenta-300)]"
                     />
                     <textarea
-                      placeholder="value, mis. Jakarta"
+                      placeholder="Isi fakta"
                       value={draftValue}
                       onChange={(e) =>
                         setDraftValue(e.target.value.slice(0, MAX_VALUE))

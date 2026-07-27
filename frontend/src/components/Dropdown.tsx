@@ -18,11 +18,14 @@ type Props = {
   triggerClass?: string;
   caption?: string;
   direction?: "up" | "down";
+  disabled?: boolean;
+  /** sm = compact (h-8), md = form field (h-10, matches .input). */
+  size?: "sm" | "md";
 };
 
 /**
- * Custom themed dropdown — keeps native <select> at bay so OS-blue popups
- * never appear. Keyboard-navigable (↑/↓/Enter/Esc, type-ahead by first letter).
+ * Custom themed dropdown — no native OS select chrome.
+ * Keyboard: ↑/↓/Enter/Esc, type-ahead first letter.
  */
 export default function Dropdown({
   value,
@@ -31,9 +34,11 @@ export default function Dropdown({
   renderSelected,
   className = "",
   title,
-  triggerClass = "min-w-[8rem]",
+  triggerClass = "",
   caption,
-  direction = "up",
+  direction = "down",
+  disabled = false,
+  size = "md",
 }: Props) {
   const [open, setOpen] = useState(false);
   const [focusIdx, setFocusIdx] = useState(0);
@@ -58,47 +63,81 @@ export default function Dropdown({
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function onKey(e: React.KeyboardEvent) {
-    if (e.key === "Escape") { setOpen(false); e.preventDefault(); return; }
+    if (disabled) return;
+    if (e.key === "Escape") {
+      setOpen(false);
+      e.preventDefault();
+      return;
+    }
     if (e.key === "Enter" || e.key === " ") {
       if (!open) setOpen(true);
-      else { onChange(options[focusIdx].value); setOpen(false); }
+      else if (options[focusIdx]) {
+        onChange(options[focusIdx].value);
+        setOpen(false);
+      }
       e.preventDefault();
       return;
     }
     if (!open) return;
-    if (e.key === "ArrowDown") { setFocusIdx((i) => (i + 1) % options.length); e.preventDefault(); }
-    else if (e.key === "ArrowUp") { setFocusIdx((i) => (i - 1 + options.length) % options.length); e.preventDefault(); }
-    else if (e.key === "Home") { setFocusIdx(0); e.preventDefault(); }
-    else if (e.key === "End") { setFocusIdx(options.length - 1); e.preventDefault(); }
-    else if (/^[a-zA-Z]$/.test(e.key)) {
+    if (e.key === "ArrowDown") {
+      setFocusIdx((i) => (i + 1) % options.length);
+      e.preventDefault();
+    } else if (e.key === "ArrowUp") {
+      setFocusIdx((i) => (i - 1 + options.length) % options.length);
+      e.preventDefault();
+    } else if (e.key === "Home") {
+      setFocusIdx(0);
+      e.preventDefault();
+    } else if (e.key === "End") {
+      setFocusIdx(options.length - 1);
+      e.preventDefault();
+    } else if (/^[a-zA-Z0-9]$/.test(e.key)) {
       const lower = e.key.toLowerCase();
-      const next = options.findIndex((o) =>
-        String(o.value).toLowerCase().startsWith(lower) ||
-        String(o.label).toLowerCase().startsWith(lower)
+      const next = options.findIndex(
+        (o) =>
+          String(o.value).toLowerCase().startsWith(lower) ||
+          String(o.label).toLowerCase().startsWith(lower)
       );
       if (next >= 0) setFocusIdx(next);
     }
   }
 
+  const sizeCls =
+    size === "sm"
+      ? "h-8 px-3 text-xs"
+      : "h-10 px-3.5 text-sm shadow-[var(--shadow-1)]";
+
   return (
-    <div ref={wrapRef} className={`relative ${className}`} onKeyDown={onKey}>
+    <div
+      ref={wrapRef}
+      className={`relative min-w-0 ${className}`}
+      onKeyDown={onKey}
+    >
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          if (!disabled) setOpen((v) => !v);
+        }}
+        disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
         title={title}
-        className={`flex h-8 items-center justify-between gap-2 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-3)] px-3 text-xs font-medium text-[var(--ink-2)] transition-colors hover:border-[var(--line-strong)] hover:text-[var(--ink)] ${triggerClass}`}
+        className={`flex w-full min-w-0 items-center justify-between gap-2 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-3)] font-medium text-[var(--ink-2)] transition-colors hover:border-[var(--line-strong)] hover:text-[var(--ink)] focus:border-[var(--magenta)] focus:outline-none focus:shadow-[var(--shadow-focus)] disabled:cursor-not-allowed disabled:opacity-50 ${sizeCls} ${triggerClass}`}
       >
-        <span className="truncate">{renderSelected ? renderSelected(selected) : (selected?.label ?? value)}</span>
+        <span className="min-w-0 flex-1 truncate text-left">
+          {renderSelected
+            ? renderSelected(selected)
+            : (selected?.label ?? value)}
+        </span>
         <svg
           viewBox="0 0 24 24"
-          className={`h-3 w-3 text-[var(--ink-3)] transition-transform ${open ? "rotate-180" : ""}`}
+          className={`h-3 w-3 shrink-0 text-[var(--ink-3)] transition-transform ${open ? "rotate-180" : ""}`}
           fill="none"
           stroke="currentColor"
           strokeWidth="2.5"
           strokeLinecap="round"
           strokeLinejoin="round"
+          aria-hidden="true"
         >
           <polyline points="6 9 12 15 18 9" />
         </svg>
@@ -108,7 +147,7 @@ export default function Dropdown({
           {caption}
         </span>
       )}
-      {open && (
+      {open && !disabled && (
         <ul
           role="listbox"
           className={`anim-scale-in absolute left-0 z-50 max-h-64 min-w-full overflow-auto rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-3)] py-1 shadow-[var(--shadow-4)] ${
@@ -124,7 +163,10 @@ export default function Dropdown({
                 role="option"
                 aria-selected={active}
                 onMouseEnter={() => setFocusIdx(i)}
-                onClick={() => { onChange(o.value); setOpen(false); }}
+                onClick={() => {
+                  onChange(o.value);
+                  setOpen(false);
+                }}
                 className={`flex cursor-pointer items-center gap-2 px-3 py-1.5 text-[13px] transition-colors ${
                   focused
                     ? "bg-[var(--magenta-50)] text-[var(--magenta-700)]"
@@ -139,9 +181,17 @@ export default function Dropdown({
                     style={{ background: o.color }}
                   />
                 )}
-                <span className="flex-1 truncate">{o.label}</span>
+                <span className="min-w-0 flex-1 truncate">{o.label}</span>
                 {active && (
-                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 text-[var(--magenta-600)]" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <svg
+                    viewBox="0 0 24 24"
+                    className="h-3.5 w-3.5 shrink-0 text-[var(--magenta-600)]"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
                     <polyline points="20 6 9 17 4 12" />
                   </svg>
                 )}
