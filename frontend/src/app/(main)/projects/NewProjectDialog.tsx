@@ -53,7 +53,7 @@ export function NewProjectDialog({
       open={open}
       onClose={onClose}
       title="Project baru"
-      description="Kelompokkan session berdasarkan topik. Instructions & knowledge akan di-inject ke system prompt saat session dimulai."
+      description="Kelompokkan session per topik. Instructions dan knowledge ikut ke system prompt saat session dimulai."
       footer={
         <>
           <Button variant="ghost" onClick={onClose} disabled={busy}>Batal</Button>

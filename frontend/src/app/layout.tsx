@@ -22,7 +22,7 @@ const jetbrains = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: "Encompletion",
-  description: "Encompletion — Web",
+  description: "Encompletion: Web",
 };
 
 export default function RootLayout({

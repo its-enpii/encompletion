@@ -1,11 +1,11 @@
-# Claude Web — Project Plan & Roadmap
+# Claude Web: project plan & roadmap
 
-> Web GUI untuk Claude Code CLI yang terhubung ke 9Router (ai.enpiistudio.com)  
-> Stack: Node.js (backend) + Next.js (frontend) + SQLite/MySQL (database)
+> Web GUI untuk Claude Code CLI ke 9Router (ai.enpiistudio.com).  
+> Stack: Node.js (backend) + Next.js (frontend) + SQLite/MySQL.
 
 ---
 
-## Gambaran Sistem
+## Gambaran sistem
 
 ```
 Browser (Next.js)
@@ -21,19 +21,19 @@ Model AI (MiniMax M3, dll.)
 
 ---
 
-## Fitur Utama
+## Fitur utama
 
-- **Chat Interface** — kirim prompt, terima response streaming dari Claude Code CLI
-- **Attachment di Chat** — upload file sebagai context per message (text, image, PDF, code)
-- **Artifact Panel** — deteksi dan render artifact dari response Claude (HTML preview, React, SVG, Markdown, code) di panel terpisah seperti Claude.ai
-- **Tool Output Viewer** — tampilkan output Bash, Read, Write, WebSearch sebagai blok terpisah di UI
-- **Session Management** — simpan, lanjutkan, dan arsipkan conversation
-- **Projects** — isolasi session berdasarkan topik/project, sharing context antar session
-- **Project Knowledge** — tambahkan dokumentasi, catatan, keputusan arsitektur per project
-- **Model Selector** — pilih model yang tersedia di 9Router
-- **Cost & Token Tracker** — monitor usage per session
-- **System Prompt** — set instruksi global per session
-- **Auth** — login sederhana, siap dikembangkan multi-user
+- **Chat**: kirim prompt, terima response streaming dari Claude Code CLI
+- **Attachment**: upload file sebagai context per message (text, image, PDF, code)
+- **Artifact panel**: deteksi dan render artifact dari response (HTML, React, SVG, Markdown, code) di panel samping, mirip Claude.ai
+- **Tool output**: tampilkan output Bash, Read, Write, WebSearch sebagai blok terpisah
+- **Session**: simpan, lanjutkan, arsip conversation
+- **Projects**: isolasi session per topik/project, share context antar session
+- **Project knowledge**: dokumentasi, catatan, keputusan arsitektur per project
+- **Model selector**: pilih model di 9Router
+- **Cost & token**: monitor usage per session
+- **System prompt**: instruksi global per session
+- **Auth**: login sederhana; multi-user di phase lanjut
 
 ---
 
@@ -94,7 +94,7 @@ claude-web/
 
 ## Database Schema
 
-> Menggunakan **SQLite** (via better-sqlite3) — cukup untuk personal use, zero config.  
+> Menggunakan **SQLite** (via better-sqlite3): cukup untuk personal use, zero config.  
 > Bisa migrasi ke MySQL nantinya jika dibutuhkan.
 
 ### Tabel `users`
@@ -264,8 +264,8 @@ users
 
 ## Roadmap
 
-### Phase 1 — Foundation (Week 1)
-> Target: Claude bisa diakses dari browser, output streaming
+### Phase 1: Foundation (Week 1)
+> Claude dari browser, output streaming
 
 - [ ] Setup project structure (backend + frontend)
 - [ ] Node.js backend: spawn Claude Code CLI + stream stdout
@@ -274,8 +274,8 @@ users
 - [ ] Test end-to-end: ketik prompt di browser → Claude respond streaming
 - [ ] Setup SQLite + migration semua tabel
 
-### Phase 2 — Session & Project Management (Week 2)
-> Target: conversation tersimpan, session bisa dikelompokkan per project
+### Phase 2: Session & Project Management (Week 2)
+> Conversation tersimpan, session dikelompokkan per project
 
 - [ ] REST API: CRUD sessions & projects
 - [ ] Simpan messages ke database
@@ -286,8 +286,8 @@ users
 - [ ] Project knowledge: tambah, edit, hapus teks/file knowledge
 - [ ] Inject project instructions + knowledge ke system prompt saat session dimulai
 
-### Phase 3 — Auth & Config (Week 2-3)
-> Target: aman diakses dari internet
+### Phase 3: Auth & Config (Week 2-3)
+> Aman diakses dari internet
 
 - [ ] Login page (single user / personal)
 - [ ] JWT authentication
@@ -295,8 +295,8 @@ users
 - [ ] Nginx reverse proxy + SSL (domain kamu)
 - [ ] Model selector (fetch dari 9Router `/v1/models`)
 
-### Phase 4 — Attachment, Tool Output & Artifacts (Week 3)
-> Target: chat support file, tool output & artifact panel tampil di UI
+### Phase 4: Attachment, Tool Output & Artifacts (Week 3)
+> Upload file, tool output, artifact panel di UI
 
 - [ ] Upload attachment di input bar (drag & drop + klik)
 - [ ] Preview attachment sebelum kirim
@@ -312,8 +312,8 @@ users
 - [ ] Tab artifact jika ada beberapa artifact per session
 - [ ] Tombol copy, download, fullscreen per artifact
 
-### Phase 5 — UX & Power Features (Week 4)
-> Target: nyaman dipakai untuk deep work sehari-hari
+### Phase 5: UX (Week 4)
+> Bisa dipakai harian
 
 - [ ] System prompt per session
 - [ ] Token & cost tracker per session + total
@@ -323,14 +323,14 @@ users
 - [ ] Dark mode (default)
 - [ ] Mobile-friendly layout
 
-### Phase 6 — Advanced (Opsional, setelah Phase 5 stabil)
-> Target: lebih powerful dari sekadar chat
+### Phase 6: Advanced (opsional, setelah Phase 5 stabil)
+> Multi-user dan fitur tambahan
 
 - [ ] Multi-user support (tim: Roku, Fandi, Faril, Agil)
-- [ ] Multi-model comparison (kirim prompt yang sama ke 2 model)
+- [ ] Multi-model comparison (prompt sama ke 2 model)
 - [ ] Tagging & search sessions
-- [ ] Webhook / notifikasi ke Telegram saat Claude selesai task panjang
-- [ ] Integrasi n8n untuk automation workflow
+- [ ] Webhook / notifikasi Telegram saat task panjang selesai
+- [ ] Integrasi n8n
 
 ---
 
@@ -375,10 +375,10 @@ MAX_ATTACHMENT_SIZE_MB=10
 | Phase 2 | 3-4 hari | Session + Project tersimpan, knowledge ter-inject |
 | Phase 3 | 1-2 hari | Auth + deploy ke domain |
 | Phase 4 | 4-5 hari | Attachment + tool output + artifact panel |
-| Phase 5 | 3-5 hari | UI lengkap, siap dipakai harian |
-| Phase 6 | Ongoing | Power features sesuai kebutuhan |
+| Phase 5 | 3-5 hari | UI lengkap, dipakai harian |
+| Phase 6 | Ongoing | Fitur tambahan sesuai kebutuhan |
 
-**Total Phase 1-5: ~2.5 minggu** (sambil kerja, bukan full-time)
+**Total Phase 1-5: ~2.5 minggu** (sambil kerja, part-time)
 
 ---
 
@@ -559,14 +559,14 @@ proc.stdout.on('data', (chunk) => {
 
 ## Catatan
 
-- **Keamanan**: Karena Claude Code CLI punya akses ke filesystem server, pastikan auth kuat dan tidak expose port 4000 langsung ke internet — selalu lewat Nginx
-- **Cost**: Model `workspace` (MiniMax M3) di 9Router kamu cost $0.111 per session "hello" — monitor usage dari Phase 5
-- **Resume session**: Claude Code CLI support `--resume <session_id>` untuk lanjutkan conversation yang sama, cocok untuk deep work
-- **Socket.IO events**: `prompt` (kirim), `stream` (terima chunk), `done` (selesai + cost), `error` (gagal), `stop` (cancel) — auto-reconnect kalau koneksi VPS putus
-- **Project context injection**: Saat session dimulai di dalam project, `instructions` + semua `project_knowledge` di-inject sebagai system message sebelum prompt user
-- **Attachment injection**: Isi file attachment di-prepend ke prompt user sebelum dikirim ke Claude Code CLI
-- **Tool output**: Event `tool_use` dari stream-json Claude Code perlu di-parse dan disimpan ke tabel `tool_uses` — ditampilkan sebagai blok collapsible di UI
-- **Artifact detection**: Parse response Claude — cari code block (```html, ```jsx, ```svg, ```md) → deteksi sebagai artifact → emit Socket.IO event `artifact` ke frontend → simpan ke DB
-- **Artifact versioning**: Jika Claude update artifact yang sama di turn berikutnya, increment `version` — UI bisa tampilkan history versi
-- **HTML artifact sandbox**: Render di `<iframe sandbox="allow-scripts">` — isolasi dari halaman utama untuk keamanan
-- **Multi-user (Phase 6)**: Schema sudah siap dengan `user_id` di semua tabel utama
+- **Keamanan**: Claude Code CLI akses filesystem server. Auth harus kuat; jangan expose port 4000 ke internet. Selalu lewat Nginx.
+- **Cost**: Model `workspace` (MiniMax M3) di 9Router ~$0.111 per session "hello". Monitor usage dari Phase 5.
+- **Resume session**: Claude Code CLI support `--resume <session_id>` untuk lanjut conversation yang sama.
+- **Socket.IO events**: `prompt` (kirim), `stream` (chunk), `done` (selesai + cost), `error`, `stop` (cancel). Auto-reconnect kalau VPS putus.
+- **Project context**: Saat session di dalam project, `instructions` + `project_knowledge` di-inject sebagai system message sebelum prompt user.
+- **Attachment**: Isi file di-prepend ke prompt user sebelum dikirim ke CLI.
+- **Tool output**: Event `tool_use` dari stream-json di-parse, disimpan ke `tool_uses`, ditampilkan sebagai blok collapsible.
+- **Artifact detection**: Parse code block (```html, ```jsx, ```svg, ```md) → artifact → emit Socket.IO `artifact` → simpan ke DB.
+- **Artifact versioning**: Update artifact di turn berikutnya increment `version`; UI bisa tampil history.
+- **HTML sandbox**: Render di `<iframe sandbox="allow-scripts">` supaya terisolasi dari halaman utama.
+- **Multi-user (Phase 6)**: Schema sudah pakai `user_id` di tabel utama.

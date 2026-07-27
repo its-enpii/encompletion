@@ -11,7 +11,7 @@ cp .env.example .env   # lalu isi OPENAI_API_KEY & OPENAI_BASE_URL
 npm run dev            # node --watch src/server.js
 ```
 
-Boot di `http://localhost:4000`. Frontend dev server akan proxy `/api` ke sini.
+Jalan di `http://localhost:4000`. Frontend dev server proxy `/api` ke sini.
 
 ### Frontend
 
@@ -21,15 +21,15 @@ npm install
 npm run dev            # next dev
 ```
 
-Boot di `http://localhost:3000`. Login pertama pakai `admin` / `admin12345` (dev only) atau `BOOTSTRAP_PASSWORD` kalau di-set.
+Jalan di `http://localhost:3000`. Login pertama: `admin` / `admin12345` (dev only), atau `BOOTSTRAP_PASSWORD` kalau di-set.
 
 ### Nginx (opsional, untuk test SSE buffering)
 
-Biasanya cukup jalankan backend + frontend tanpa Nginx saat dev. Nginx cuma relevan untuk produksi karena konfigurasi SSE-nya (`proxy_buffering off`) sering bikin masalah di reverse proxy lain.
+Dev biasanya cukup backend + frontend. Nginx relevan di produksi: konfigurasi SSE (`proxy_buffering off`) sering bermasalah di reverse proxy lain.
 
 ## Testing
 
-Backend pakai Node's built-in test runner — tidak ada framework tambahan.
+Backend pakai Node's built-in test runner. Tidak ada framework test tambahan.
 
 ```bash
 cd backend
@@ -45,35 +45,35 @@ Atau sekaligus:
 node --test src/*.test.js
 ```
 
-Test memverifikasi: chunker/embedder RAG, lifecycle run-registry, hash + scope API key, format system prompt.
+Cakupan: chunker/embedder RAG, lifecycle run-registry, hash + scope API key, format system prompt.
 
-## Struktur Kode yang Patut Diketahui
+## Struktur kode
 
-- `backend/src/llm-runner.js` — header file mendokumentasikan vocabulary event yang dipakai frontend. Kalau tambah event baru, update header + `frontend/src/lib/runStream.ts`.
-- `backend/src/run-registry.js` — Run disimpan in-memory, hilang saat restart. Frontend handle reconnect dengan minta replay event dari `lastSeq`.
-- `backend/src/db/index.js` — Tambah kolom baru = tambah blok `if (!_cols.includes(...)) ALTER TABLE ...` di atas `CREATE TABLE`. Idempotent, aman di-boot ulang.
+- `backend/src/llm-runner.js`: header file dokumentasi vocabulary event frontend. Event baru: update header + `frontend/src/lib/runStream.ts`.
+- `backend/src/run-registry.js`: run in-memory, hilang saat restart. Frontend reconnect minta replay dari `lastSeq`.
+- `backend/src/db/index.js`: kolom baru: blok `if (!_cols.includes(...)) ALTER TABLE ...` di atas `CREATE TABLE`. Idempotent.
 
 ## Debugging SSE
 
-Kalau stream muncul satu chunk lalu diam:
+Stream muncul satu chunk lalu diam:
 
-1. Cek Nginx: pastikan `proxy_buffering off` di location block, dan response kirim header `X-Accel-Buffering: no`.
-2. Cek backend: `res.setHeader('Cache-Control', 'no-cache')`, `res.setHeader('Connection', 'keep-alive')`, flush tiap event.
-3. Test tanpa Nginx dulu — langsung hit `http://localhost:4000/api/runs/:id/events`.
+1. Nginx: `proxy_buffering off` di location block, response header `X-Accel-Buffering: no`.
+2. Backend: `res.setHeader('Cache-Control', 'no-cache')`, `res.setHeader('Connection', 'keep-alive')`, flush tiap event.
+3. Coba tanpa Nginx dulu: `http://localhost:4000/api/runs/:id/events`.
 
 ## Tambah Tool Baru
 
-1. Implement di `backend/src/tools.js` — handler async `(input, ctx) => result`.
+1. Implement di `backend/src/tools.js`: handler async `(input, ctx) => result`.
 2. Daftarkan di schema di `llm-runner.js` (tools array di body request).
 3. Handle event `tool_use` / `tool_result` di `frontend/src/components/ToolBlock.tsx` kalau perlu render khusus.
 
 ## Tambah Model
 
-Lewat UI: login admin → `/models` → tambah. Isi `key` (mis. `claude-sonnet-5`), `label`, `base_url`, `api_key`. Atau set di `.env` provider langsung; model registry hanya daftarkan alias yang user boleh pilih.
+UI: login admin → `/models` → tambah. Isi `key` (mis. `claude-sonnet-5`), `label`, `base_url`, `api_key`. Atau set provider di `.env`; registry cuma alias yang user boleh pilih.
 
 ## Ganti Provider
 
-Cukup ubah `OPENAI_BASE_URL` + `OPENAI_API_KEY` di `.env`. Asalkan provider expose endpoint `POST /chat/completions` yang streaming `data: {...}\n\n`, tidak ada kode yang perlu diubah.
+Ubah `OPENAI_BASE_URL` + `OPENAI_API_KEY` di `.env`. Provider harus expose `POST /chat/completions` streaming `data: {...}\n\n`. Kode tidak perlu diubah.
 
 ## Konvensi
 
@@ -81,8 +81,8 @@ Cukup ubah `OPENAI_BASE_URL` + `OPENAI_API_KEY` di `.env`. Asalkan provider expo
 - Frontend: App Router, `"use client"` hanya di komponen yang pakai hook/interaksi, prefer Server Component default.
 - Commit: bahasa Inggris, imperative subject, body jelaskan **why** bukan **what**.
 
-## Catatan Penting
+## Catatan
 
-- **Jangan** commit `.env` atau file SQLite. `.gitignore` sudah cover.
-- **Production wajib** set `JWT_SECRET` persistent + `BOOTSTRAP_PASSWORD`. Tanpa `BOOTSTRAP_PASSWORD` di `NODE_ENV=production`, backend boot akan throw.
-- File di `backend/data/` (SQLite + uploads) di-mount sebagai volume di docker-compose — backup sebelum redeploy kalau data penting.
+- Jangan commit `.env` atau file SQLite. Sudah di `.gitignore`.
+- Production: set `JWT_SECRET` persistent + `BOOTSTRAP_PASSWORD`. Tanpa `BOOTSTRAP_PASSWORD` di `NODE_ENV=production`, boot throw.
+- `backend/data/` (SQLite + uploads) di-mount volume di docker-compose. Backup sebelum redeploy kalau data penting.

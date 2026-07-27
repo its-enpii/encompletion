@@ -79,25 +79,24 @@ export default function LoginPage() {
           </div>
 
           <p className="max-w-md text-[15px] leading-relaxed text-[var(--dark-text-2)]">
-            Streaming responses, project-aware instructions, skill management, dan artifact rendering —
-            semua tanpa meninggalkan UI yang kamu buka sekarang.
+            Response streaming, instruction per project, skill, dan preview artifact, semuanya di UI yang sama.
           </p>
 
           <div className="space-y-3 pt-4">
             <Feature
               icon="stream"
-              title="Real-time streaming"
-              subtitle="Lihat jawaban terbentuk token demi token"
+              title="Streaming"
+              subtitle="Jawaban muncul token demi token"
             />
             <Feature
               icon="folder"
-              title="Project context"
-              subtitle="Knowledge & instructions otomatis ter-inject ke prompt"
+              title="Konteks project"
+              subtitle="Knowledge dan instructions ikut ke prompt"
             />
             <Feature
               icon="terminal"
               title="Artifacts"
-              subtitle="HTML, React, SVG, dokumen — preview di panel samping"
+              subtitle="HTML, React, SVG, dokumen di panel samping"
             />
           </div>
         </div>
@@ -108,7 +107,7 @@ export default function LoginPage() {
             <span className="grid h-1.5 w-1.5 place-items-center rounded-full bg-[var(--success)]">
               <span className="h-1.5 w-1.5 animate-ping rounded-full bg-[var(--success)] opacity-75" />
             </span>
-            <span>All systems operational</span>
+            <span>Siap dipakai</span>
           </div>
           <span>Enpii Studio · v1</span>
         </div>
@@ -124,10 +123,10 @@ export default function LoginPage() {
 
           <div className="mb-6 hidden lg:block">
             <h2 className="text-2xl font-semibold tracking-tight text-[var(--ink)]">
-              Welcome back
+              Masuk
             </h2>
             <p className="mt-1 text-sm text-[var(--ink-3)]">
-              Sign in untuk mulai sesi.
+              Login untuk mulai sesi.
             </p>
           </div>
 
@@ -172,11 +171,11 @@ export default function LoginPage() {
                   {loading ? (
                     <>
                       <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                      <span>Signing in…</span>
+                      <span>Masuk…</span>
                     </>
                   ) : (
                     <>
-                      <span>Sign in</span>
+                      <span>Masuk</span>
                       <svg viewBox="0 0 24 24" className="h-4 w-4 transition-transform group-hover:translate-x-0.5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <line x1="5" y1="12" x2="19" y2="12" />
                         <polyline points="12 5 19 12 12 19" />

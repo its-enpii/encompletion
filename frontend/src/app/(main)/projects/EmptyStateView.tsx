@@ -44,7 +44,7 @@ export function EmptyProjectsView({
         </svg>
       }
       title="Belum ada project"
-      description="Mulai dengan membuat project pertamamu. Kamu bisa mengelompokkan session berdasarkan topik."
+      description="Buat project pertama. Session bisa dikelompokkan per topik."
       action={
         <Button variant="primary" onClick={onCreate}>
           <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">

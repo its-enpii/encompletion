@@ -357,12 +357,12 @@ function EmptyHero() {
         <SuggestionCard
           icon="code"
           title="Jelaskan kode ini"
-          subtitle="Tempel snippet, dapat penjelasan baris per baris"
+          subtitle="Tempel snippet, dapat penjelasan per baris"
         />
         <SuggestionCard
           icon="bug"
           title="Debug error ini"
-          subtitle="Paste stack trace, dapat diagnosis & fix"
+          subtitle="Paste stack trace, dapat diagnosis dan fix"
         />
         <SuggestionCard
           icon="rocket"
@@ -372,7 +372,7 @@ function EmptyHero() {
         <SuggestionCard
           icon="git"
           title="Review pull request"
-          subtitle="Dapatkan feedback & saran refactor"
+          subtitle="Feedback dan saran refactor"
         />
       </div>
 
