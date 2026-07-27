@@ -740,13 +740,20 @@ export default function Chat({
         // from `result` already replaces it (if the run produced text).
         // Leaving the spinner string here makes the header look stuck.
         setInfo(null);
-        // Backend sends the freshly-derived title on `done` so the header
-        // and sidebar refresh without a follow-up GET /full. Fall back
-        // to null when the backend didn't include it (older builds) — in
-        // that case the sidebar listener still pulls the latest title via
-        // /api/sessions after notifySidebarChanged().
+        // Backend sends the derived title on `done`. Patch header immediately
+        // and push the same title to the sidebar so they stay in sync
+        // (list fetch alone used to skip re-render when only title changed).
         if (typeof payload?.title === "string" || payload?.title === null) {
-          setActiveSession((cur) => (cur ? { ...cur, title: payload.title ?? null } : cur));
+          const nextTitle = payload.title ?? null;
+          setActiveSession((cur) => (cur ? { ...cur, title: nextTitle } : cur));
+          const sid = payload.sessionId ?? sessionId;
+          if (typeof window !== "undefined" && sid != null) {
+            window.dispatchEvent(
+              new CustomEvent("app:session-title", {
+                detail: { sessionId: sid, title: nextTitle },
+              })
+            );
+          }
         }
         // Auto-cleanup on error. The server deleted either the whole
         // session (first-turn failure) or just the failed pair (later

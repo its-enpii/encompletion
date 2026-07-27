@@ -244,16 +244,20 @@ function readAttachmentAsDataUrl(att) {
   }
 }
 
-// Greetings and one-word test pings that should never become a session
-// title. Matching is case-insensitive and tolerates trailing punctuation
-// + spaces. Common Indonesian + English fillers.
-const GENERIC_PROMPT_RE = /^(halo|hai|hi|hello|hey|test|tes|ok|oke|okay|ya|yes|yoi|bro|broh|p|ping|\?+|!+|\.+|\s*)+$/i;
+// Pure greetings / pings — never good session titles alone.
+const GENERIC_PROMPT_RE = /^(halo|hai|hi|hello|hey|test|tes|ok|oke|okay|ya|yes|yoi|bro|broh|p|ping|assalamualaikum|wasalam|selamat\s+(pagi|siang|sore|malam)|good\s+(morning|afternoon|evening|night)|\?+|!+|\.+|\s*)([,!.…\s]+(halo|hai|hi|hello|hey|bro|sore|pagi|siang|malam|semuanya|semua|kawan|teman|dong|ya|yuk))?$/i;
+const GREETING_PREFIX_RE = /^(halo|hai|hi|hello|hey|selamat\s+(pagi|siang|sore|malam)|good\s+(morning|afternoon|evening|night)|assalamualaikum)\b[\s,!.…:-]*/i;
+
 function isGenericPrompt(prompt) {
   if (!prompt) return true;
   const trimmed = prompt.trim().replace(/[.!?,…]+$/g, '').trim();
   if (trimmed.length === 0) return true;
   if (trimmed.length < 3) return true;
-  return GENERIC_PROMPT_RE.test(trimmed);
+  if (GENERIC_PROMPT_RE.test(trimmed)) return true;
+  // "Halo, jam berapa?" → not fully generic (has a question after greeting).
+  const withoutGreeting = trimmed.replace(GREETING_PREFIX_RE, '').trim();
+  if (!withoutGreeting) return true;
+  return false;
 }
 
 /** Cap a title on a word boundary (max 60 chars). */
@@ -268,28 +272,28 @@ function clipTitle(text) {
   return candidate;
 }
 
-/**
- * Prefer the user's first prompt as the session title (ChatGPT-style).
- * Only fall back to the assistant reply when the prompt is a greeting
- * or empty (image-only). Never put a clock/answer line in the chrome.
- */
-function deriveTitleFromPrompt(prompt) {
-  if (isGenericPrompt(prompt)) return null;
-  const words = String(prompt).trim().split(/\s+/).slice(0, 10).join(' ');
-  return clipTitle(words);
+/** Topic-ish phrase from user text: drop leading greeting fluff. */
+function topicFromPrompt(prompt) {
+  if (!prompt || typeof prompt !== 'string') return null;
+  let t = prompt.trim().replace(GREETING_PREFIX_RE, '').trim();
+  t = t.replace(/^[,!.…\s:-]+/, '').trim();
+  if (!t || isGenericPrompt(t)) return null;
+  return clipTitle(t.split(/\s+/).slice(0, 10).join(' '));
 }
 
-// Fallback when the user only said "halo" / image-only: short phrase from
-// the assistant reply. Strips fences/markdown; first sentence, max 60.
-function deriveTitleFromReply(replyText) {
+// Short phrase from assistant reply. Strips fences/markdown; first sentence.
+function topicFromReply(replyText) {
   if (!replyText || typeof replyText !== 'string') return null;
-  const stripped = replyText
+  let stripped = replyText
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/^#{1,6}\s+/gm, '')
     .replace(/\*\*([^*]+)\*\*/g, '$1')
     .replace(/[*_`]+/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+  // Drop leading assistant greetings so "Sore. Mau bantu apa?" → topic tail.
+  stripped = stripped.replace(GREETING_PREFIX_RE, '').trim();
+  stripped = stripped.replace(/^(sore|pagi|siang|malam)\b[\s.!,…:-]*/i, '').trim();
   if (stripped.length < 4) return null;
   const sentenceMatch = stripped.match(/^.{1,60}?[.!?](?:\s|$)/);
   let candidate = sentenceMatch ? sentenceMatch[0].trim() : stripped.slice(0, 60);
@@ -303,7 +307,25 @@ function deriveTitleFromReply(replyText) {
         .trim();
     }
   }
-  return clipTitle(candidate);
+  return clipTitle(candidate.replace(/[.!?]+$/, '').trim());
+}
+
+/**
+ * Session title from first turn: synthesize topic from user + reply.
+ * - Substantive user question → use that (minus greeting prefix).
+ * - Greeting / empty → use useful phrase from assistant reply.
+ * - Never raw full AI answer or raw "Halo, selamat sore".
+ */
+function deriveSessionTitle(prompt, replyText) {
+  const fromUser = topicFromPrompt(prompt);
+  const fromReply = topicFromReply(replyText);
+  if (fromUser) return fromUser;
+  if (fromReply) return fromReply;
+  // Last resort: clipped raw prompt if it wasn't pure empty.
+  if (prompt && String(prompt).trim().length >= 8) {
+    return clipTitle(String(prompt).trim().split(/\s+/).slice(0, 8).join(' '));
+  }
+  return null;
 }
 
 /**
@@ -869,7 +891,6 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
       .get(dbSession.id).n;
     const isFirstUserTurn = userMsgCount === 1;
     if (isFirstUserTurn && !isError) {
-      const promptTitle = deriveTitleFromPrompt(safePrompt);
       const hasImages = Array.isArray(attachments) && attachments.length > 0;
       const imageOnly = hasImages && !safePrompt.trim();
       const attTitle = imageOnly
@@ -877,8 +898,9 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
           ? 'Image'
           : `${attachments.length} images`
         : null;
-      const replyTitle = deriveTitleFromReply(assistantFullText);
-      dbSession.title = promptTitle || attTitle || replyTitle || null;
+      // Topic from user question and/or first reply — not raw greeting,
+      // not the full AI answer dumped into chrome.
+      dbSession.title = deriveSessionTitle(safePrompt, assistantFullText) || attTitle || null;
     }
 
     // Cleanup on error. The user asked: instead of leaving an empty

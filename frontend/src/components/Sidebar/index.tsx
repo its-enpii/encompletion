@@ -138,11 +138,19 @@ export default function Sidebar({
         // object. Treat non-arrays as no-op; the next debounced load
         // will retry the real list.
         if (!Array.isArray(data)) return cur;
-        // Skip the re-render if the payload is structurally identical
-        // to what we already have. Cheaper than re-rendering the entire
-        // list every time the chat nudges refreshKey, and avoids the
-        // visible blink from React's reconciliation pass.
-        if (cur.length === data.length && cur.every((s, i) => s.id === data[i].id)) {
+        // Skip re-render only when id + title (+ star/updated) match.
+        // Old check compared only ids — auto-title on done never
+        // updated the row, so sidebar stayed "New chat" while navbar
+        // already showed the derived title.
+        if (
+          cur.length === data.length &&
+          cur.every((s, i) =>
+            s.id === data[i].id &&
+            s.title === data[i].title &&
+            s.starred === data[i].starred &&
+            s.updated_at === data[i].updated_at
+          )
+        ) {
           return cur;
         }
         return data;
@@ -167,8 +175,29 @@ export default function Sidebar({
   // it decoupled and lets the sidebar refresh from anywhere in the tree.
   useEffect(() => {
     function onChanged() { load(); }
+    function onTitle(e: Event) {
+      const detail = (e as CustomEvent).detail as
+        | { sessionId?: number; title?: string | null }
+        | undefined;
+      if (!detail?.sessionId) return;
+      // Instant patch so navbar/sidebar match without waiting for debounced
+      // list fetch after run `done`.
+      setSessions((cur) =>
+        cur.map((s) =>
+          s.id === detail.sessionId
+            ? { ...s, title: detail.title ?? s.title }
+            : s
+        )
+      );
+      // Still refetch so ordering/updated_at stay correct.
+      load();
+    }
     window.addEventListener("app:sessions-changed", onChanged);
-    return () => window.removeEventListener("app:sessions-changed", onChanged);
+    window.addEventListener("app:session-title", onTitle as EventListener);
+    return () => {
+      window.removeEventListener("app:sessions-changed", onChanged);
+      window.removeEventListener("app:session-title", onTitle as EventListener);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
