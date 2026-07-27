@@ -74,9 +74,19 @@ export function MessageList({
         const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
         onScroll(gap);
       }}
-      className="relative min-h-0 flex-1 overflow-y-auto overscroll-y-contain bg-[var(--paper)]"
+      className={`relative min-h-0 flex-1 overscroll-y-contain bg-[var(--paper)] ${
+        messages.length === 0 && !streaming
+          ? "overflow-hidden"
+          : "overflow-y-auto"
+      }`}
     >
-      <div className="mx-auto flex max-w-3xl flex-col gap-7 px-4 py-10">
+      <div
+        className={`mx-auto flex max-w-3xl flex-col px-4 ${
+          messages.length === 0 && !streaming
+            ? "h-full min-h-0 justify-center gap-4 py-4"
+            : "gap-7 py-10"
+        }`}
+      >
         {messages.length === 0 && !streaming && sessionId == null && <EmptyHero />}
         {messages.map((m, idx) => {
           const prev = messages[idx - 1];
@@ -125,7 +135,7 @@ export function MessageList({
         {streaming && messages[messages.length - 1]?.role !== "assistant" && (
           <TypingPill />
         )}
-        <div className="h-6" />
+        {messages.length > 0 && <div className="h-6" />}
       </div>
       {showJump && <JumpToBottom onClick={onJump} />}
       {openArtifact && (
@@ -336,19 +346,21 @@ function TextPreview({ att }: { att: Att }) {
 }
 
 function EmptyHero() {
+  // Compact on short mobile viewports so /new does not force document scroll
+  // under the Chrome address bar (4 tall cards + py-10 used to overflow).
   return (
-    <div className="mx-auto mt-4 flex max-w-2xl flex-col items-center gap-6 text-center anim-fade-in">
-      <div className="grid h-16 w-16 place-items-center rounded-2xl bg-gradient-to-br from-[var(--saffron-100)] via-[var(--saffron-300)] to-[var(--saffron-500)] text-[var(--ink)] shadow-[inset_0_2px_0_rgba(255,255,255,0.5),0_8px_24px_rgba(232,162,43,0.25)]">
-        <svg viewBox="0 0 24 24" className="h-8 w-8 fill-current">
+    <div className="mx-auto flex w-full max-w-2xl flex-col items-center gap-3 text-center anim-fade-in sm:gap-5">
+      <div className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-[var(--saffron-100)] via-[var(--saffron-300)] to-[var(--saffron-500)] text-[var(--ink)] shadow-[inset_0_2px_0_rgba(255,255,255,0.5),0_8px_24px_rgba(232,162,43,0.25)] sm:h-16 sm:w-16">
+        <svg viewBox="0 0 24 24" className="h-6 w-6 fill-current sm:h-8 sm:w-8">
           <path d="M12 2 L22 12 L12 22 L2 12 Z" />
         </svg>
       </div>
 
-      <div>
-        <h2 className="text-2xl font-semibold tracking-tight text-[var(--ink)]">
+      <div className="px-2">
+        <h2 className="text-xl font-semibold tracking-tight text-[var(--ink)] sm:text-2xl">
           Mulai percakapan baru
         </h2>
-        <p className="mt-1.5 text-sm text-[var(--ink-3)]">
+        <p className="mt-1 text-sm text-[var(--ink-3)]">
           Tanyakan apa saja. Konteks diingat selama sesi berlangsung.
         </p>
       </div>
@@ -365,20 +377,18 @@ function EmptyHero() {
           subtitle="Paste stack trace, dapat diagnosis dan fix"
         />
         <SuggestionCard
+          className="hidden sm:flex"
           icon="rocket"
           title="Buatkan boilerplate"
           subtitle="Scaffold project, komponen, atau test"
         />
         <SuggestionCard
+          className="hidden sm:flex"
           icon="git"
           title="Review pull request"
           subtitle="Feedback dan saran refactor"
         />
       </div>
-
-      {/* No footer attribution — we deliberately do not surface engine
-          identity or model name on the public welcome surface. Operators
-          who want a visible badge can add one here. */}
     </div>
   );
 }
@@ -387,13 +397,15 @@ function SuggestionCard({
   icon,
   title,
   subtitle,
+  className = "",
 }: {
   icon: "code" | "bug" | "rocket" | "git";
   title: string;
   subtitle: string;
+  className?: string;
 }) {
   return (
-    <button className="group/sugg flex items-start gap-3 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-3)] p-3.5 text-left shadow-[var(--shadow-1)] transition-all hover:-translate-y-0.5 hover:border-[var(--line-strong)] hover:shadow-[var(--shadow-2)]">
+    <button className={`group/sugg flex items-start gap-3 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-3)] p-3 text-left shadow-[var(--shadow-1)] transition-all hover:-translate-y-0.5 hover:border-[var(--line-strong)] hover:shadow-[var(--shadow-2)] sm:p-3.5 ${className}`}>
       <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--r-sm)] bg-[var(--saffron-50)] text-[var(--saffron-500)] transition-colors group-hover/sugg:bg-[var(--saffron-100)]">
         <SuggestionIcon name={icon} className="h-4 w-4" />
       </span>
