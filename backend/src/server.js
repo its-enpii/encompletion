@@ -78,6 +78,13 @@ app.get('/api/health', (_req, res) => {
 });
 
 app.use('/api/auth', authRouter);
+
+// Run lifecycle MUST mount before `/api/sessions` + requireAuth.
+// Stream path is /api/sessions/:id/runs/:runId/stream?ticket=… — if
+// sessions' requireAuth runs first, EventSource (no Bearer) gets 401 and
+// never reaches requireAuthOrStreamTicket. Per-route auth lives on runsRouter.
+app.use('/api', runsRouter);
+
 app.use('/api/users', requireAuth, usersRouter);
 app.use('/api/roles', requireAuth, rolesRouter);
 app.use('/api/sessions', requireAuth, sessionsRouter);
@@ -95,8 +102,7 @@ app.use('/api/api-keys', requireAuth, apiKeysRouter);
 app.use('/api/memory', requireAuth, memoryRouter);
 
 // Public OpenAPI surface — auth via api-keys, model locked to the key.
-// MUST be mounted before `/api` (runsRouter) so the v1 paths don't get
-// caught by the JWT middleware.
+// MUST be mounted before `/api` catch-alls so v1 paths don't hit JWT.
 app.use('/api/v1', requireApiKey, v1Router);
 
 // Embed mode (E2) — browser widget API. Mixed auth:
@@ -109,10 +115,6 @@ app.use('/api/embed', embedRouter);
 // Embed mode (E3.4) — admin CRUD for tenants, capability profiles,
 // tools, and the tool_executions audit log. All routes require admin.
 app.use('/api/admin/embed', embedAdminRouter);
-
-// Run lifecycle: start a run, stream events over SSE, stop a run.
-// Auth is per-route inside runsRouter so SSE can use ?ticket= without JWT.
-app.use('/api', runsRouter);
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`[server] listening on http://0.0.0.0:${PORT}`);

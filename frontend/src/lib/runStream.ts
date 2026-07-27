@@ -81,13 +81,14 @@ export type StartRunResponse = { runId: number; sessionId: number; streamTicket?
 export function subscribeRun(opts: SubscribeRunOpts): { unsubscribe: () => void; source: EventSource } {
   const params = new URLSearchParams();
   // Prefer short-lived stream ticket so the long-lived JWT never lands in
-  // access logs / Referer. Fall back to ?token= only for legacy servers.
+  // access logs / Referer. Also send ?token= as belt-and-braces when a
+  // proxy/middleware still requires JWT (e.g. sessions requireAuth mounted
+  // before the stream route). Ticket alone is enough on a correct stack.
   if (opts.streamTicket) {
     params.set("ticket", opts.streamTicket);
-  } else {
-    const token = getToken();
-    if (token) params.set("token", token);
   }
+  const token = getToken();
+  if (token) params.set("token", token);
   const url = `/api/sessions/${opts.sessionId}/runs/${opts.runId}/stream?${params.toString()}`;
 
   const source = new EventSource(url);
