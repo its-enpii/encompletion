@@ -22,6 +22,7 @@ import { detectArtifacts, evaluateArtifact } from '../artifact-detector.js';
 import { renderProjectMemoryFactsBlock } from '../project_memory.js';
 import rag from '../rag.js';
 import registry from '../run-registry.js';
+import { roleMayUseModel } from '../model-access.js';
 
 const router = express.Router();
 // Auth is per-route (not router.use) so the SSE stream can accept a
@@ -332,6 +333,10 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
     if (!own) return res.status(403).json({ error: 'project not accessible' });
   }
 
+  // Model RBAC: requested key (body) or session-stored key must be
+  // allowed for this user's role. Empty role_models grants → all enabled.
+  const fallbackModel = process.env.DEFAULT_MODEL || process.env.LLM_DEFAULT_MODEL || 'workspace';
+
   // Resolve or create session row.
   let dbSession;
   if (sessionId) {
@@ -340,7 +345,24 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
     if (req.user.role !== 'admin' && dbSession.user_id !== req.user.id) {
       return res.status(403).json({ error: 'session not accessible' });
     }
+    // Switch model for this turn when client sends a key.
+    if (typeof model === 'string' && model.trim() && model.trim() !== dbSession.model) {
+      const next = model.trim();
+      if (!roleMayUseModel(req.user.role, next)) {
+        return res.status(403).json({ error: 'model not allowed for your role' });
+      }
+      db.prepare(
+        `UPDATE sessions SET model = ?, updated_at = ? WHERE id = ?`
+      ).run(next, new Date().toISOString(), dbSession.id);
+      dbSession = db.prepare('SELECT * FROM sessions WHERE id = ?').get(dbSession.id);
+    } else if (!roleMayUseModel(req.user.role, dbSession.model)) {
+      return res.status(403).json({ error: 'session model not allowed for your role' });
+    }
   } else {
+    const chosen = (typeof model === 'string' && model.trim()) ? model.trim() : fallbackModel;
+    if (!roleMayUseModel(req.user.role, chosen)) {
+      return res.status(403).json({ error: 'model not allowed for your role' });
+    }
     const info = db
       .prepare(
         `INSERT INTO sessions (title, model, project_id, system_prompt, user_id, owner_type, owner_id, created_at, updated_at)
@@ -353,7 +375,7 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
         // raw prompt here would lock in greetings like "Halo kamu" via
         // COALESCE in the post-run UPDATE.
         'New chat',
-        model || process.env.DEFAULT_MODEL || 'workspace',
+        chosen,
         projectId || null,
         systemPrompt || null,
         req.user.id,

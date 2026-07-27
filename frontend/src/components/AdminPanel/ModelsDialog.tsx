@@ -49,17 +49,37 @@ export function ModelsDialog({ open, onClose }: { open: boolean; onClose: () => 
   const [modal, setModal] = useState<
     { kind: "create" } | { kind: "edit"; model: Model } | null
   >(null);
+  const [importing, setImporting] = useState(false);
+  const [grants, setGrants] = useState<{ admin: string[]; member: string[] }>({
+    admin: [],
+    member: [],
+  });
+  const [grantRole, setGrantRole] = useState<"member" | "admin">("member");
+  const [grantDraft, setGrantDraft] = useState<string[]>([]);
+  const [grantBusy, setGrantBusy] = useState(false);
 
   async function load() {
     setLoading(true);
     setError(null);
     try {
-      const r = await authFetch("/api/models?all=1");
-      if (!r.ok) {
-        const d = await r.json().catch(() => ({}));
-        throw new Error(d.error || `HTTP ${r.status}`);
+      const [rModels, rGrants] = await Promise.all([
+        authFetch("/api/models?all=1"),
+        authFetch("/api/models/role-access"),
+      ]);
+      if (!rModels.ok) {
+        const d = await rModels.json().catch(() => ({}));
+        throw new Error(d.error || `HTTP ${rModels.status}`);
       }
-      setModels(await r.json());
+      setModels(await rModels.json());
+      if (rGrants.ok) {
+        const g = await rGrants.json();
+        const next = {
+          admin: Array.isArray(g?.grants?.admin) ? g.grants.admin : [],
+          member: Array.isArray(g?.grants?.member) ? g.grants.member : [],
+        };
+        setGrants(next);
+        setGrantDraft(next[grantRole] || []);
+      }
     } catch (e: any) {
       setError(e.message || "failed to load");
     } finally {
@@ -74,6 +94,10 @@ export function ModelsDialog({ open, onClose }: { open: boolean; onClose: () => 
     setModal(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, authLoading, me?.role]);
+
+  useEffect(() => {
+    setGrantDraft(grants[grantRole] || []);
+  }, [grantRole, grants]);
 
   const stats = useMemo(() => ({
     total: models.length,
@@ -140,14 +164,75 @@ export function ModelsDialog({ open, onClose }: { open: boolean; onClose: () => 
     pingSiblings();
   }
 
+  async function importFromEndpoint() {
+    if (importing) return;
+    setImporting(true);
+    try {
+      const r = await authFetch("/api/models/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enable_new: true }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      toast(
+        `Import OK: +${d.added || 0} baru, ${d.skipped_existing || 0} sudah ada` +
+          (d.upstream_count != null ? ` (upstream ${d.upstream_count})` : ""),
+        "success"
+      );
+      await load();
+      pingSiblings();
+    } catch (e: any) {
+      toast(e?.message || "Import gagal", "error");
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  async function saveRoleGrants() {
+    setGrantBusy(true);
+    try {
+      const r = await authFetch("/api/models/role-access", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: grantRole, model_keys: grantDraft }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      setGrants((prev) => ({ ...prev, [grantRole]: d.model_keys || [] }));
+      toast(
+        d.unrestricted
+          ? `Role ${grantRole}: unrestricted (semua model enabled)`
+          : `Role ${grantRole}: ${ (d.model_keys || []).length } model`,
+        "success"
+      );
+      pingSiblings();
+    } catch (e: any) {
+      toast(e?.message || "Gagal simpan RBAC", "error");
+    } finally {
+      setGrantBusy(false);
+    }
+  }
+
+  function toggleGrantKey(key: string) {
+    setGrantDraft((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    );
+  }
+
   const headerActions = me?.role === "admin" ? (
-    <Button variant="primary" size="sm" onClick={() => setModal({ kind: "create" })}>
-      <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-        <line x1="12" y1="5" x2="12" y2="19" />
-        <line x1="5" y1="12" x2="19" y2="12" />
-      </svg>
-      <span>Tambah model</span>
-    </Button>
+    <div className="flex items-center gap-2">
+      <Button variant="ghost" size="sm" onClick={importFromEndpoint} disabled={importing}>
+        {importing ? "Import…" : "Import dari endpoint"}
+      </Button>
+      <Button variant="primary" size="sm" onClick={() => setModal({ kind: "create" })}>
+        <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+          <line x1="12" y1="5" x2="12" y2="19" />
+          <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+        <span>Tambah model</span>
+      </Button>
+    </div>
   ) : null;
 
   return (
@@ -221,8 +306,76 @@ export function ModelsDialog({ open, onClose }: { open: boolean; onClose: () => 
               </div>
             )}
 
+            <Card className="mt-6 p-4">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-semibold text-[var(--ink)]">Akses model per role (RBAC)</h3>
+                  <p className="mt-0.5 text-xs text-[var(--ink-3)]">
+                    Kosong = unrestricted (semua model enabled). Centang subset untuk membatasi role.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={grantRole}
+                    onChange={(e) => setGrantRole(e.target.value as "member" | "admin")}
+                    className="rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--paper)] px-2 py-1 text-sm"
+                  >
+                    <option value="member">member</option>
+                    <option value="admin">admin</option>
+                  </select>
+                  <Button variant="primary" size="sm" onClick={saveRoleGrants} disabled={grantBusy}>
+                    {grantBusy ? "Menyimpan…" : "Simpan akses"}
+                  </Button>
+                </div>
+              </div>
+              {grantDraft.length === 0 ? (
+                <div className="mb-2 rounded-[var(--r-sm)] border border-[var(--success)]/30 bg-[var(--success-50)] px-2 py-1.5 text-[11px] text-[var(--success)]">
+                  Mode unrestricted untuk <strong>{grantRole}</strong> — semua model enabled boleh dipakai.
+                </div>
+              ) : (
+                <div className="mb-2 text-[11px] text-[var(--ink-3)]">
+                  {grantDraft.length} model dipilih untuk <strong>{grantRole}</strong>
+                </div>
+              )}
+              <div className="grid max-h-48 gap-1 overflow-auto sm:grid-cols-2 lg:grid-cols-3">
+                {models.map((m) => (
+                  <label
+                    key={m.id}
+                    className={`flex cursor-pointer items-center gap-2 rounded-[var(--r-sm)] border px-2 py-1.5 text-xs ${
+                      grantDraft.includes(m.key)
+                        ? "border-[var(--magenta-200)] bg-[var(--magenta-50)]"
+                        : "border-[var(--line)] bg-[var(--paper)]"
+                    } ${!m.enabled ? "opacity-50" : ""}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={grantDraft.includes(m.key)}
+                      onChange={() => toggleGrantKey(m.key)}
+                      className="h-3.5 w-3.5 accent-[var(--magenta)]"
+                    />
+                    <span className="min-w-0 truncate">
+                      <span className="font-medium text-[var(--ink)]">{m.label}</span>
+                      <code className="ml-1 text-[10px] text-[var(--ink-3)]">{m.key}</code>
+                    </span>
+                  </label>
+                ))}
+              </div>
+              {grantDraft.length > 0 && (
+                <button
+                  type="button"
+                  className="mt-2 text-[11px] text-[var(--ink-3)] underline hover:text-[var(--ink)]"
+                  onClick={() => setGrantDraft([])}
+                >
+                  Clear → unrestricted
+                </button>
+              )}
+            </Card>
+
             <div className="mt-6 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-2)]/40 px-4 py-3 text-xs text-[var(--ink-3)]">
-              <strong className="font-semibold text-[var(--ink-2)]">Catatan:</strong> perubahan di sini langsung terlihat di dropdown chat semua user (via broadcast socket). Session lama yang mereferensikan model yang dinonaktifkan masih bisa dibuka kembali untuk dilihat — saat mengirim pesan baru, sistem tetap memakai key yang tersimpan.
+              <strong className="font-semibold text-[var(--ink-2)]">Catatan:</strong>{" "}
+              <em>Import dari endpoint</em> memanggil <code>GET {"{LLM_BASE_URL}"}/models</code> dan
+              menambahkan key baru (skip yang sudah ada). RBAC memfilter dropdown + menolak run
+              model di luar grant. Session lama dengan model terlarang akan 403 saat kirim pesan.
             </div>
           </>
         )}

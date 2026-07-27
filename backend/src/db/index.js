@@ -577,6 +577,18 @@ function migrate() {
     CREATE INDEX IF NOT EXISTS idx_project_memory_facts_project
       ON project_memory_facts(project_id, key);
   `);
+
+  // Role → model RBAC. Empty set for a role means "all enabled models"
+  // (legacy default). Admin UI can pin a subset so members only see /
+  // may run those keys. role is users.role ('admin' | 'member').
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS role_models (
+      role       TEXT NOT NULL CHECK(role IN ('admin', 'member')),
+      model_key  TEXT NOT NULL,
+      PRIMARY KEY (role, model_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_role_models_role ON role_models(role);
+  `);
 }
 
 migrate();

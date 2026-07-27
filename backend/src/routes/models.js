@@ -1,6 +1,7 @@
 import express from 'express';
 import db from '../db/index.js';
 import { requireAdmin } from '../middleware/auth.js';
+import { allowedModelKeysForRole } from '../model-access.js';
 
 const router = express.Router();
 
@@ -24,6 +25,7 @@ function normalizeKey(raw) {
   const k = raw.trim();
   if (!k) return null;
   if (/\s/.test(k)) return null;
+  if (k.length > 200) return null;
   return k;
 }
 
@@ -60,21 +62,172 @@ function safeEnabled(row) {
   };
 }
 
+/** Roles that may hold model grants (users.role values). */
+const GRANT_ROLES = ['admin', 'member'];
+
 // GET /api/models — any auth user. Returns enabled models sorted for the
-// dropdown. Admin views use the same endpoint plus pass ?all=1 to see
-// disabled rows (the admin UI uses that to manage the registry).
+// dropdown, filtered by role_models grants. Admin + ?all=1 sees full
+// registry (disabled included) for the management UI.
 router.get('/', (req, res) => {
   const showAll = req.query.all === '1' && req.user.role === 'admin';
-  const rows = showAll
-    ? db
-        .prepare('SELECT * FROM models ORDER BY sort_order ASC, id ASC')
-        .all()
-    : db
-        .prepare(
-          'SELECT * FROM models WHERE enabled = 1 ORDER BY sort_order ASC, id ASC'
-        )
-        .all();
-  res.json(rows.map(showAll ? safeRow : safeEnabled));
+  if (showAll) {
+    const rows = db
+      .prepare('SELECT * FROM models ORDER BY sort_order ASC, id ASC')
+      .all();
+    return res.json(rows.map(safeRow));
+  }
+  const allowed = new Set(allowedModelKeysForRole(req.user.role));
+  const rows = db
+    .prepare(
+      'SELECT * FROM models WHERE enabled = 1 ORDER BY sort_order ASC, id ASC'
+    )
+    .all()
+    .filter((row) => allowed.has(row.key));
+  res.json(rows.map(safeEnabled));
+});
+
+// GET /api/models/role-access — admin. Full grant map for RBAC UI.
+router.get('/role-access', requireAdmin, (_req, res) => {
+  const rows = db.prepare('SELECT role, model_key FROM role_models ORDER BY role, model_key').all();
+  const byRole = { admin: [], member: [] };
+  for (const row of rows) {
+    if (byRole[row.role]) byRole[row.role].push(row.model_key);
+  }
+  res.json({
+    roles: GRANT_ROLES,
+    grants: byRole,
+    // Empty array = unrestricted for that role.
+    note: 'Empty grants for a role means all enabled models are allowed.',
+  });
+});
+
+// PUT /api/models/role-access — admin. Replace grants for one role.
+// Body: { role: 'member'|'admin', model_keys: string[] }
+// Empty model_keys → unrestricted for that role.
+router.put('/role-access', requireAdmin, (req, res) => {
+  const role = req.body?.role === 'admin' ? 'admin' : req.body?.role === 'member' ? 'member' : null;
+  if (!role) return res.status(400).json({ error: 'role must be admin or member' });
+  const raw = Array.isArray(req.body?.model_keys) ? req.body.model_keys : null;
+  if (!raw) return res.status(400).json({ error: 'model_keys must be an array' });
+
+  const keys = [];
+  const seen = new Set();
+  for (const item of raw) {
+    const k = normalizeKey(typeof item === 'string' ? item : '');
+    if (!k || seen.has(k)) continue;
+    // Only accept keys that exist in registry (enabled or not — admin
+    // may pre-grant a disabled model before re-enabling).
+    const exists = db.prepare('SELECT id FROM models WHERE key = ?').get(k);
+    if (!exists) continue;
+    seen.add(k);
+    keys.push(k);
+  }
+
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM role_models WHERE role = ?').run(role);
+    const ins = db.prepare('INSERT INTO role_models (role, model_key) VALUES (?, ?)');
+    for (const k of keys) ins.run(role, k);
+  });
+  tx();
+
+  res.json({
+    role,
+    model_keys: keys,
+    unrestricted: keys.length === 0,
+  });
+});
+
+// POST /api/models/import — admin. Pull OpenAI-compatible GET /models
+// from LLM_BASE_URL and upsert into the local registry.
+// Body optional: { enable_new?: boolean } default true for new keys only.
+router.post('/import', requireAdmin, async (req, res) => {
+  const baseUrl = (process.env.LLM_BASE_URL || '').replace(/\/+$/, '');
+  if (!baseUrl) {
+    return res.status(400).json({ error: 'LLM_BASE_URL is not configured' });
+  }
+  const apiKey = process.env.LLM_API_KEY || '';
+  const enableNew = req.body?.enable_new === false ? false : true;
+  const url = `${baseUrl}/models`;
+
+  let data;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20_000);
+    let r;
+    try {
+      r = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          Accept: 'application/json',
+          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+        },
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!r.ok) {
+      const body = await r.text().catch(() => '');
+      return res.status(502).json({
+        error: `upstream models HTTP ${r.status}`,
+        detail: body.slice(0, 300),
+      });
+    }
+    data = await r.json();
+  } catch (e) {
+    return res.status(502).json({
+      error: e?.name === 'AbortError' ? 'upstream models timeout' : (e?.message || String(e)),
+    });
+  }
+
+  // OpenAI shape: { data: [ { id, ... } ] }. Also accept bare array.
+  const list = Array.isArray(data?.data)
+    ? data.data
+    : Array.isArray(data)
+      ? data
+      : Array.isArray(data?.models)
+        ? data.models
+        : [];
+
+  const maxSort = db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS n FROM models').get().n;
+  let nextSort = maxSort + 10;
+  const insert = db.prepare(
+    `INSERT INTO models (key, label, enabled, sort_order) VALUES (?, ?, ?, ?)`
+  );
+  const existsStmt = db.prepare('SELECT id, enabled FROM models WHERE key = ?');
+
+  let added = 0;
+  let skipped = 0;
+  let invalid = 0;
+  const addedKeys = [];
+
+  const tx = db.transaction(() => {
+    for (const item of list) {
+      const rawId = item?.id ?? item?.name ?? item?.model ?? item?.key;
+      const key = normalizeKey(typeof rawId === 'string' ? rawId : String(rawId || ''));
+      if (!key) { invalid++; continue; }
+      if (existsStmt.get(key)) { skipped++; continue; }
+      // Label: last path segment or full key, capped 64.
+      const labelRaw = (item?.name && typeof item.name === 'string' && item.name !== key)
+        ? item.name
+        : (key.includes('/') ? key.split('/').pop() : key);
+      const label = normalizeLabel(String(labelRaw).slice(0, 64)) || key.slice(0, 64);
+      insert.run(key, label, enableNew ? 1 : 0, nextSort);
+      nextSort += 10;
+      added++;
+      addedKeys.push(key);
+    }
+  });
+  tx();
+
+  res.json({
+    ok: true,
+    source: url,
+    upstream_count: list.length,
+    added,
+    skipped_existing: skipped,
+    invalid,
+    added_keys: addedKeys,
+  });
 });
 
 // POST /api/models — admin only.

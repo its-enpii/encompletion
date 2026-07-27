@@ -5,6 +5,7 @@ import path from 'node:path';
 import db from '../db/index.js';
 import { ZipWriter } from '../zip-writer.js';
 import rag from '../rag.js';
+import { roleMayUseModel } from '../model-access.js';
 
 const router = express.Router();
 
@@ -176,6 +177,12 @@ router.post('/', (req, res) => {
   if (workdir && !safeWorkdir) {
     return res.status(400).json({ error: 'invalid workdir' });
   }
+  const chosen = (typeof model === 'string' && model.trim())
+    ? model.trim()
+    : (process.env.DEFAULT_MODEL || process.env.LLM_DEFAULT_MODEL || 'workspace');
+  if (!roleMayUseModel(req.user.role, chosen)) {
+    return res.status(403).json({ error: 'model not allowed for your role' });
+  }
   const info = db
     .prepare(
       `INSERT INTO sessions (title, model, project_id, system_prompt, user_id, workdir, owner_type, owner_id, created_at, updated_at)
@@ -183,7 +190,7 @@ router.post('/', (req, res) => {
     )
     .run(
       title?.trim() || null,
-      model || process.env.DEFAULT_MODEL || 'workspace',
+      chosen,
       project_id || null,
       system_prompt || null,
       req.user.id,
@@ -215,7 +222,7 @@ router.patch('/:id', (req, res) => {
   const own = ownSessionOr404(req.params.id, req.user);
   if (!own) return res.status(404).json({ error: 'not found' });
 
-  const { title, project_id, system_prompt, archived, starred, workdir } = req.body || {};
+  const { title, project_id, system_prompt, archived, starred, workdir, model } = req.body || {};
   // If changing project_id, ensure ownership
   if (project_id !== undefined && project_id !== null) {
     const projOk = db
@@ -231,6 +238,14 @@ router.patch('/:id', (req, res) => {
   if (title !== undefined) { fields.push('title = ?'); params.push(title); }
   if (project_id !== undefined) { fields.push('project_id = ?'); params.push(project_id); }
   if (system_prompt !== undefined) { fields.push('system_prompt = ?'); params.push(system_prompt); }
+  if (model !== undefined) {
+    const next = typeof model === 'string' ? model.trim() : '';
+    if (!next) return res.status(400).json({ error: 'model required' });
+    if (!roleMayUseModel(req.user.role, next)) {
+      return res.status(403).json({ error: 'model not allowed for your role' });
+    }
+    fields.push('model = ?'); params.push(next);
+  }
   if (starred !== undefined) { fields.push('starred = ?'); params.push(starred ? 1 : 0); }
   if (workdir !== undefined) {
     const safeWorkdir = resolveWorkdir(req.user, workdir);
