@@ -351,13 +351,17 @@ export default function Sidebar({
     });
     if (!ok) return;
     const prior = sessions;
+    const wasActive = activeSessionId === id;
     setSessions((cur) => cur.filter((s) => s.id !== id));
+    // Leave the ghost chat view immediately if we deleted the open session.
+    if (wasActive) gotoNewChat();
     try {
       const r = await authFetch(`/api/sessions/${id}`, { method: "DELETE" });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
     } catch {
       toast("Gagal hapus session", "error");
       setSessions(prior);
+      // Don't auto-restore the deleted route — list is back; user can re-open.
     }
   }
 
