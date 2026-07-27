@@ -387,22 +387,37 @@ function SelectPill({
           </div>
           {searchable && (
             <div className="border-b border-[var(--line)] px-2 py-1.5">
-              <input
-                ref={searchRef}
-                type="search"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Cari model…"
-                className="w-full rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--paper)] px-2 py-1.5 text-[12px] text-[var(--ink)] outline-none placeholder:text-[var(--ink-3)] focus:border-[var(--magenta-300)]"
-                onKeyDown={(e) => {
-                  // Keep typing from bubbling to global shortcuts.
-                  e.stopPropagation();
-                  if (e.key === "Enter" && filtered[0]) {
-                    onChange(filtered[0].value);
-                    setOpen(false);
-                  }
-                }}
-              />
+              <div className="relative">
+                <svg
+                  viewBox="0 0 24 24"
+                  className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--ink-3)]"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="11" cy="11" r="7" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <input
+                  ref={searchRef}
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Cari model…"
+                  className="w-full rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--paper-2)] py-1.5 pl-8 pr-2 text-[12px] text-[var(--ink)] outline-none placeholder:text-[var(--ink-3)] focus:border-[var(--magenta-300)] focus:bg-[var(--paper-3)] focus:ring-2 focus:ring-[var(--magenta-500)]/15"
+                  onKeyDown={(e) => {
+                    // Keep typing from bubbling to global shortcuts.
+                    e.stopPropagation();
+                    if (e.key === "Enter" && filtered[0]) {
+                      onChange(filtered[0].value);
+                      setOpen(false);
+                    }
+                  }}
+                />
+              </div>
             </div>
           )}
           <ul role="listbox" className="max-h-64 overflow-y-auto py-1">

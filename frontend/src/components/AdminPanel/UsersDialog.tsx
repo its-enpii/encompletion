@@ -723,6 +723,7 @@ function CreateForm({
   const [busy, setBusy] = useState(false);
 
   async function submit() {
+    if (password.length < 12) return setErr("Password minimal 12 karakter");
     setBusy(true);
     setErr(null);
     try {
@@ -737,7 +738,7 @@ function CreateForm({
     <form onSubmit={(e) => { e.preventDefault(); submit(); }} className="space-y-3">
       <TextField label="Username" value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />
       <TextField label="Display name (opsional)" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
-      <TextField label="Password (min 6)" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+      <TextField label="Password (min 12)" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
       <div>
         <label className="label mb-1.5 block">Role</label>
         <select value={role} onChange={(e) => setRole(e.target.value)} className="input">
@@ -753,7 +754,7 @@ function CreateForm({
       )}
       <div className="flex justify-end gap-2 pt-2">
         <Button variant="ghost" type="button" onClick={onCancel} disabled={busy}>Batal</Button>
-        <Button variant="primary" type="submit" disabled={busy || !username.trim() || password.length < 6}>
+        <Button variant="primary" type="submit" disabled={busy || !username.trim() || password.length < 12}>
           {busy ? "Membuat…" : "Buat"}
         </Button>
       </div>
@@ -836,7 +837,7 @@ function ResetForm({ user, onCancel, onSubmit }: { user: User; onCancel: () => v
   const [busy, setBusy] = useState(false);
 
   async function submit() {
-    if (password.length < 6) return setErr("Password minimal 6 karakter");
+    if (password.length < 12) return setErr("Password minimal 12 karakter");
     if (password !== confirm) return setErr("Password tidak sama");
     setBusy(true);
     setErr(null);
@@ -850,7 +851,7 @@ function ResetForm({ user, onCancel, onSubmit }: { user: User; onCancel: () => v
 
   return (
     <form onSubmit={(e) => { e.preventDefault(); submit(); }} className="space-y-3">
-      <TextField label="Password baru (min 6)" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus />
+      <TextField label="Password baru (min 12)" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus />
       <TextField label="Konfirmasi" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
       {err && (
         <div className="rounded-[var(--r-md)] border border-[var(--danger)]/40 bg-[var(--danger-50)] px-3 py-2 text-sm text-[var(--danger)]">
@@ -859,7 +860,7 @@ function ResetForm({ user, onCancel, onSubmit }: { user: User; onCancel: () => v
       )}
       <div className="flex justify-end gap-2 pt-2">
         <Button variant="ghost" type="button" onClick={onCancel} disabled={busy}>Batal</Button>
-        <Button variant="primary" type="submit" disabled={busy}>
+        <Button variant="primary" type="submit" disabled={busy || password.length < 12 || password !== confirm}>
           {busy ? "Menyimpan…" : "Reset"}
         </Button>
       </div>

@@ -346,13 +346,26 @@ export function ModelsDialog({ open, onClose }: { open: boolean; onClose: () => 
                   {grantDraft.length} model dipilih untuk <strong>{grantRole}</strong>
                 </div>
               )}
-              <div className="mb-2">
+              <div className="relative mb-2">
+                <svg
+                  viewBox="0 0 24 24"
+                  className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--ink-3)]"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="11" cy="11" r="7" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
                 <input
-                  type="search"
+                  type="text"
                   value={grantQuery}
                   onChange={(e) => setGrantQuery(e.target.value)}
                   placeholder="Cari model (label atau key)…"
-                  className="w-full rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--paper)] px-2 py-1.5 text-xs text-[var(--ink)] outline-none placeholder:text-[var(--ink-3)] focus:border-[var(--magenta-300)]"
+                  className="w-full rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--paper-2)] py-1.5 pl-8 pr-2 text-xs text-[var(--ink)] outline-none placeholder:text-[var(--ink-3)] focus:border-[var(--magenta-300)] focus:bg-[var(--paper-3)] focus:ring-2 focus:ring-[var(--magenta-500)]/15"
                 />
               </div>
               <div className="grid max-h-64 gap-1 overflow-auto sm:grid-cols-2 lg:grid-cols-3">

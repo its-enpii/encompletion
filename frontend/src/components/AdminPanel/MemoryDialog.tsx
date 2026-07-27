@@ -234,15 +234,15 @@ export function MemoryDialog({ open, onClose }: { open: boolean; onClose: () => 
               aria-checked={autoMemory}
               disabled={savingToggle}
               onClick={toggleAutoMemory}
-              className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors ${
+              className={`relative h-6 w-11 shrink-0 overflow-hidden rounded-full border transition-colors ${
                 autoMemory
                   ? "border-[var(--saffron-300)] bg-[var(--saffron-200)]"
                   : "border-[var(--line)] bg-[var(--paper-3)]"
               } ${savingToggle ? "opacity-60" : ""}`}
             >
               <span
-                className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
-                  autoMemory ? "translate-x-5" : "translate-x-0.5"
+                className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                  autoMemory ? "translate-x-[1.25rem]" : "translate-x-0"
                 }`}
               />
             </button>

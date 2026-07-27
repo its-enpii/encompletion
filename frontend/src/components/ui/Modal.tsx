@@ -98,7 +98,7 @@ export function CenteredDialog({
         aria-modal="true"
         aria-label={typeof title === "string" ? title : undefined}
         tabIndex={-1}
-        className={`card anim-scale-in w-full overflow-hidden ${widthClass} max-h-[90vh] shadow-[var(--shadow-4)] outline-none`}
+        className={`card anim-scale-in w-full min-w-0 overflow-hidden ${widthClass} max-h-[90vh] shadow-[var(--shadow-4)] outline-none`}
       >
         {!hideHeader && (title || description) && (
           <header className="flex items-start justify-between gap-4 border-b border-[var(--line)] px-6 py-4">
@@ -124,7 +124,7 @@ export function CenteredDialog({
             </button>
           </header>
         )}
-        <div className="px-6 py-5 overflow-y-auto">{children}</div>
+        <div className="min-w-0 overflow-x-hidden overflow-y-auto px-6 py-5">{children}</div>
         {footer && (
           <footer className="flex flex-wrap justify-end gap-2 border-t border-[var(--line)] bg-[var(--paper-2)] px-6 py-3">
             {footer}

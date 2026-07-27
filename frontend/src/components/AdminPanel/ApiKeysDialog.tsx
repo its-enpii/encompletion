@@ -136,8 +136,8 @@ export function ApiKeysDialog({ open, onClose }: { open: boolean; onClose: () =>
             <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[var(--ink-3)]">
               Buat baru
             </h2>
-            <form onSubmit={submitCreate} className="flex flex-wrap items-end gap-3">
-              <label className="flex flex-col gap-1 text-xs text-[var(--ink-2)]">
+            <form onSubmit={submitCreate} className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto] sm:items-end">
+              <label className="flex min-w-0 flex-col gap-1 text-xs text-[var(--ink-2)]">
                 Nama
                 <input
                   type="text"
@@ -145,15 +145,15 @@ export function ApiKeysDialog({ open, onClose }: { open: boolean; onClose: () =>
                   onChange={(e) => setName(e.target.value)}
                   placeholder="e.g. curl-test"
                   maxLength={64}
-                  className="rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm text-[var(--ink)] outline-none focus:border-[var(--magenta-300)]"
+                  className="input"
                 />
               </label>
-              <label className="flex flex-col gap-1 text-xs text-[var(--ink-2)]">
+              <label className="flex min-w-0 flex-col gap-1 text-xs text-[var(--ink-2)]">
                 Model
                 <select
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
-                  className="rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm text-[var(--ink)] outline-none focus:border-[var(--magenta-300)]"
+                  className="input min-w-0 max-w-full"
                 >
                   {models.map((m) => (
                     <option key={m.key} value={m.key}>
@@ -162,7 +162,7 @@ export function ApiKeysDialog({ open, onClose }: { open: boolean; onClose: () =>
                   ))}
                 </select>
               </label>
-              <Button type="submit" variant="primary" disabled={creating || !name.trim() || !model}>
+              <Button type="submit" variant="primary" disabled={creating || !name.trim() || !model} className="sm:mb-0.5">
                 {creating ? "Membuat…" : "Buat key"}
               </Button>
             </form>

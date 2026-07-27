@@ -604,18 +604,18 @@ function TenantCreateDialog({
           placeholder={autoSlug || "laundryaja"}
           hint={slugValid ? "✓ valid" : "Format: huruf kecil, angka, dash"}
         />
-        <div className="flex items-center gap-3">
-          <label className="flex flex-1 flex-col gap-1 text-xs text-[var(--ink-2)]">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="flex min-w-0 flex-col gap-1 text-xs text-[var(--ink-2)]">
             Status
-            <select value={status} onChange={(e) => setStatus(e.target.value as any)} className="rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm text-[var(--ink)] outline-none focus:border-[var(--magenta-300)]">
+            <select value={status} onChange={(e) => setStatus(e.target.value as any)} className="input">
               <option value="active">active</option>
               <option value="trial">trial</option>
               <option value="suspended">suspended</option>
             </select>
           </label>
-          <label className="flex flex-1 flex-col gap-1 text-xs text-[var(--ink-2)]">
+          <label className="flex min-w-0 flex-col gap-1 text-xs text-[var(--ink-2)]">
             Default model
-            <select value={defaultModelId} onChange={(e) => setDefaultModelId(e.target.value)} className="rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm text-[var(--ink)] outline-none focus:border-[var(--magenta-300)]">
+            <select value={defaultModelId} onChange={(e) => setDefaultModelId(e.target.value)} className="input min-w-0 max-w-full">
               <option value="">— none —</option>
               {models.map((m) => <option key={m.id} value={m.id}>{m.label} ({m.key})</option>)}
             </select>
