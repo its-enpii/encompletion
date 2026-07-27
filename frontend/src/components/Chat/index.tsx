@@ -231,23 +231,41 @@ export default function Chat({
       const t = data.tool_uses || [];
       const a = data.artifacts || [];
       const atts = data.attachments || [];
-      // Merge DB snapshot with any optimistic local messages. On a fresh
-      // chat flow (`/chat/new` → `POST /api/sessions` → router.push to
-      // `/chat/[id]`) the user message row is committed to the DB by
-      // `POST /runs` *after* the SSE stream is opened, so a `loadSession`
-      // fired in parallel with that POST can race and return an empty
-      // messages array — wiping the optimistic bubble that `send()` or
-      // `triggerPendingRun` just added. Keep any optimistic bubbles that
-      // don't yet have a DB match; drop optimistic bubbles whose content
-      // matches a real DB row to avoid duplicates.
+      // Merge DB snapshot with live local messages.
+      // 1) Optimistic user bubbles (id < 0) not yet in DB.
+      // 2) Live streaming assistant (id 0 until message_saved). Mid-stream
+      //    loadSession must NOT wipe it — that blanked the UI until refresh.
       const dbUserContents = new Set(
         dbMsgs.filter((row: any) => row.role === "user").map((row: any) => row.content)
       );
-      const optimisticOnly = messagesRef.current.filter((local) => {
-        if (local.id >= 0) return false; // real DB row, drop
-        return !dbUserContents.has(local.content);
+      const local = messagesRef.current;
+      const optimisticUsers = local.filter((m) => {
+        if (m.id >= 0 || m.role !== "user") return false;
+        return !dbUserContents.has(m.content);
       });
-      const m = [...optimisticOnly, ...dbMsgs];
+      const lastLocal = local[local.length - 1];
+      const lastDb = dbMsgs[dbMsgs.length - 1];
+      const lastDbAsst = [...dbMsgs].reverse().find((r: any) => r.role === "assistant");
+      let liveAssistant: Msg | null = null;
+      if (lastLocal?.role === "assistant" && lastLocal.content) {
+        const dbText = typeof lastDbAsst?.content === "string" ? lastDbAsst.content : "";
+        if (!lastDbAsst) {
+          // First assistant of the session still streaming.
+          liveAssistant = lastLocal;
+        } else if (lastLocal.content.length > dbText.length) {
+          // Same turn still growing, or new turn longer than last saved reply.
+          liveAssistant = lastLocal;
+        } else if (
+          lastDb?.role === "user" ||
+          (lastLocal.id <= 0 && lastLocal.content !== dbText && !dbText.startsWith(lastLocal.content))
+        ) {
+          // New turn: DB ends on the new user row, or live text differs from last saved assistant.
+          liveAssistant = lastLocal;
+        }
+      }
+      const m = liveAssistant
+        ? [...optimisticUsers, ...dbMsgs, liveAssistant]
+        : [...optimisticUsers, ...dbMsgs];
       // Group attachments by message_id for MessageList lookup.
       const attMap: Record<number, Att[]> = {};
       const token = typeof window !== "undefined" ? getToken() : null;
@@ -313,32 +331,25 @@ export default function Chat({
         });
       }
       setArtifactsByMsg(artMap);
-      setUsage(null);
-      setInfo(null);
-      // Always pull the persisted snapshot — the user message row was
-      // written to the DB before the SSE stream opens, so even when
-      // mid-stream the DB is the authoritative source. The streaming
-      // check used to live here but it caused a real bug: when a
-      // fresh chat navigates from /chat/new to /chat/[id] while
-      // streaming=true (set by send() right before the route push),
-      // the snapshot was skipped and the optimistic bubble stayed
-      // orphaned if anything in the navigation cleared the state.
-      // We accept a brief flicker when text deltas arrive between
-      // snapshot and re-attach — better than a silent blank thread.
       setMessages(m);
-      // If the DB snapshot already has a finished assistant reply —
-      // i.e. the run ended while we were reconnecting — clear the
-      // streaming spinner and the activeRunId so we don't keep showing
-      // "Sedang berpikir…" on top of a finalised message. Match by
-      // presence of an assistant row, not by content length, because a
-      // 504 / gateway timeout still creates the assistant row but
-      // leaves its content empty.
-      const hasAssistantRow = m.some((row: any) => row.role === "assistant");
-      if (hasAssistantRow) {
+      // Only end the active stream when DB proves THIS turn finished.
+      // Old bug: any prior assistant (turn 1) cleared the run on turn 2+
+      // loadSession, so SSE closed and the new reply only appeared after
+      // a full page refresh.
+      const dbAssistantCount = dbMsgs.filter((row: any) => row.role === "assistant").length;
+      const dbUserCount = dbMsgs.filter((row: any) => row.role === "user").length;
+      // Turn complete when assistant count catches user count (each user
+      // prompt pairs with one assistant row once the run closes).
+      const turnComplete = dbAssistantCount > 0 && dbAssistantCount >= dbUserCount;
+      if (turnComplete && !liveAssistant) {
         setStreaming(false);
         clearRun();
         setLastTickAt(null);
         setInfo(null);
+        setUsage(null);
+        if (typeof window !== "undefined" && id != null) {
+          try { window.sessionStorage.removeItem(`app:active-run:${id}`); } catch { /* ignore */ }
+        }
       }
       scrollToBottom();
     } catch (e: any) {
@@ -597,10 +608,15 @@ export default function Chat({
         if (!isMine(payload)) return;
         setMessages((cur) => {
           const last = cur[cur.length - 1];
-          if (last && last.role === "assistant") {
+          // Only append onto an in-flight assistant (id <= 0). A finished
+          // row (positive DB id) must not absorb the next turn's deltas —
+          // that rewrote turn 1 while turn 2 was streaming, then vanished
+          // on loadSession until hard refresh.
+          if (last && last.role === "assistant" && last.id <= 0) {
             return [...cur.slice(0, -1), { ...last, content: last.content + payload.text }];
           }
-          return [...cur, { id: 0, role: "assistant", content: payload.text }];
+          const id = --optimisticCounterRef.current;
+          return [...cur, { id, role: "assistant", content: payload.text }];
         });
       },
       stderr: (payload: { sessionId?: number; text: string }) => {
@@ -684,7 +700,8 @@ export default function Chat({
         let optimisticId: number | null = null;
         setMessages((cur) => {
           if (cur.length === 0) return cur;
-          const idx = cur.findLastIndex((m) => m.role === "assistant");
+          // Prefer the in-flight assistant (id <= 0), not an older saved one.
+          const idx = cur.findLastIndex((m) => m.role === "assistant" && m.id <= 0);
           if (idx === -1) return cur;
           optimisticId = cur[idx].id;
           const copy = cur.slice();
@@ -815,32 +832,15 @@ export default function Chat({
     };
   }, [sessionId, activeRunId, activeStreamTicket]);
 
-  // SSE safety net — if the EventSource silently drops mid-run (network
-  // blip, server-side registry timeout) the `done` event may never
-  // arrive and TypingPill stays up forever. Poll /full every 10s while
-  // streaming is on; once the DB shows a non-empty assistant reply,
-  // clear the spinner locally and stop polling.
+  // SSE safety net — if EventSource drops or misses done/result (fast
+  // run finished before subscribe), poll /full and merge into state.
+  // Old poll only cleared the spinner → blank UI until hard refresh.
   useEffect(() => {
     if (!streaming || sessionId == null) return;
     if (typeof window === "undefined") return;
     const poll = setInterval(() => {
-      authFetch(`/api/sessions/${sessionId}/full`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data) => {
-          if (!data) return;
-          const msgs = data.messages || [];
-          // Any assistant row means the run is finished — clear the
-          // spinner. Empty content means the engine returned an error
-          // (504, gateway timeout, etc) but the row still exists.
-          if (msgs.some((row: any) => row.role === "assistant")) {
-            setStreaming(false);
-            clearRun();
-            setLastTickAt(null);
-            setInfo(null);
-          }
-        })
-        .catch(() => { /* ignore — next poll retries */ });
-    }, 10_000);
+      void loadSession(sessionId);
+    }, 3_000);
     return () => clearInterval(poll);
   }, [streaming, sessionId]);
 
