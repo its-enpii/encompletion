@@ -535,7 +535,8 @@ export default function Chat({
   // the most likely reason we're here is that the SSE socket was lost
   // mid-stream and the assistant reply already landed in the DB — the
   // local state just never got the `text` / `result` / `done` events.
-  const TIMEOUT_MS = 60_000;
+  // 1h matches long reasoning models; nginx stream proxy_read_timeout is 1h.
+  const TIMEOUT_MS = 3_600_000;
   useEffect(() => {
     if (!streaming) return;
     const t = setTimeout(() => {

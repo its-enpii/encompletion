@@ -228,7 +228,8 @@ const TOOLS = [
 const MAX_TOOL_RESULT_BYTES = 64 * 1024;
 const DEFAULT_TOOL_DEADLINE_MS = 30_000;
 const MAX_TOOL_ROUNDS = 10;
-const TURN_DEADLINE_MS_DEFAULT = Number(process.env.LLM_TIMEOUT_MS) || 120_000;
+// Default 1h — long reasoning / creative turns. Override with LLM_TIMEOUT_MS.
+const TURN_DEADLINE_MS_DEFAULT = Number(process.env.LLM_TIMEOUT_MS) || 3_600_000;
 
 /**
  * Resolve the system prompt for a user. Returns the saved row if the
