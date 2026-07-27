@@ -2,6 +2,7 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import db from '../db/index.js';
 import { requireAdmin } from '../middleware/auth.js';
+import { roleExists } from '../model-access.js';
 
 const router = express.Router();
 
@@ -94,7 +95,9 @@ router.post('/', requireAdmin, (req, res) => {
   if (password.length < 12) {
     return res.status(400).json({ error: 'password too short (min 12 chars)' });
   }
-  const safeRole = role === 'admin' ? 'admin' : 'member';
+  const requested = typeof role === 'string' ? role.trim() : 'member';
+  const safeRole = roleExists(requested) ? requested : null;
+  if (!safeRole) return res.status(400).json({ error: 'unknown role' });
   const exists = db.prepare('SELECT id FROM users WHERE username = ?').get(username.trim());
   if (exists) return res.status(409).json({ error: 'username already exists' });
 
@@ -118,11 +121,12 @@ router.patch('/:id', requireAdmin, (req, res) => {
   const params = [];
 
   if (role !== undefined) {
-    if (role !== 'admin' && role !== 'member') {
-      return res.status(400).json({ error: 'role must be admin or member' });
+    const nextRole = typeof role === 'string' ? role.trim() : '';
+    if (!roleExists(nextRole)) {
+      return res.status(400).json({ error: 'unknown role' });
     }
-    // Don't allow demoting the last admin
-    if (target.role === 'admin' && role !== 'admin') {
+    // Don't allow demoting the last admin (platform superuser slug).
+    if (target.role === 'admin' && nextRole !== 'admin') {
       const otherAdmins = db
         .prepare(`SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND id != ?`)
         .get(req.params.id).n;
@@ -130,7 +134,7 @@ router.patch('/:id', requireAdmin, (req, res) => {
         return res.status(400).json({ error: 'cannot demote the last admin' });
       }
     }
-    fields.push('role = ?'); params.push(role);
+    fields.push('role = ?'); params.push(nextRole);
   }
   if (display_name !== undefined) {
     fields.push('display_name = ?'); params.push(display_name?.trim() || null);

@@ -1,7 +1,7 @@
 import express from 'express';
 import db from '../db/index.js';
 import { requireAdmin } from '../middleware/auth.js';
-import { allowedModelKeysForRole } from '../model-access.js';
+import { allowedModelKeysForRole, listRoleIds, roleExists } from '../model-access.js';
 
 const router = express.Router();
 
@@ -62,9 +62,6 @@ function safeEnabled(row) {
   };
 }
 
-/** Roles that may hold model grants (users.role values). */
-const GRANT_ROLES = ['admin', 'member'];
-
 // GET /api/models — any auth user. Returns enabled models sorted for the
 // dropdown, filtered by role_models grants. Admin + ?all=1 sees full
 // registry (disabled included) for the management UI.
@@ -88,13 +85,14 @@ router.get('/', (req, res) => {
 
 // GET /api/models/role-access — admin. Full grant map for RBAC UI.
 router.get('/role-access', requireAdmin, (_req, res) => {
+  const roleIds = listRoleIds();
   const rows = db.prepare('SELECT role, model_key FROM role_models ORDER BY role, model_key').all();
-  const byRole = { admin: [], member: [] };
+  const byRole = Object.fromEntries(roleIds.map((id) => [id, []]));
   for (const row of rows) {
     if (byRole[row.role]) byRole[row.role].push(row.model_key);
   }
   res.json({
-    roles: GRANT_ROLES,
+    roles: roleIds,
     grants: byRole,
     // Empty array = unrestricted for that role.
     note: 'Empty grants for a role means all enabled models are allowed.',
@@ -102,11 +100,14 @@ router.get('/role-access', requireAdmin, (_req, res) => {
 });
 
 // PUT /api/models/role-access — admin. Replace grants for one role.
-// Body: { role: 'member'|'admin', model_keys: string[] }
+// Body: { role: string, model_keys: string[] }
 // Empty model_keys → unrestricted for that role.
 router.put('/role-access', requireAdmin, (req, res) => {
-  const role = req.body?.role === 'admin' ? 'admin' : req.body?.role === 'member' ? 'member' : null;
-  if (!role) return res.status(400).json({ error: 'role must be admin or member' });
+  const roleRaw = typeof req.body?.role === 'string' ? req.body.role.trim() : '';
+  if (!roleRaw || !roleExists(roleRaw)) {
+    return res.status(400).json({ error: 'unknown role' });
+  }
+  const role = roleRaw;
   const raw = Array.isArray(req.body?.model_keys) ? req.body.model_keys : null;
   if (!raw) return res.status(400).json({ error: 'model_keys must be an array' });
 

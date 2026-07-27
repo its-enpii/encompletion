@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { UsersDialog } from "./UsersDialog";
 import { ModelsDialog } from "./ModelsDialog";
+import { RolesDialog } from "./RolesDialog";
 import { EmbedAdminDialog } from "./EmbedAdminDialog";
 import { ApiKeysDialog } from "./ApiKeysDialog";
 import { SystemPromptDialog } from "./SystemPromptDialog";
@@ -15,7 +16,7 @@ import { MemoryDialog } from "./MemoryDialog";
  * "admin:open-*" event from anywhere in the tree opens the same
  * dialog (no duplicate state).
  *
- * Dialog kinds: 'users' | 'models' | 'embed' | 'api-keys' | 'prompt' | 'memory'.
+ * Dialog kinds: 'users' | 'roles' | 'models' | 'embed' | 'api-keys' | 'prompt' | 'memory'.
  * A null state means no dialog is open; rendering is a no-op so
  * presence of the host in the tree doesn't affect performance.
  *
@@ -25,10 +26,11 @@ import { MemoryDialog } from "./MemoryDialog";
  * effect, NOT on every render — opening a dialog doesn't change
  * pathname, so the dialog stays open across renders.
  */
-type DialogKind = "users" | "models" | "embed" | "api-keys" | "prompt" | "memory" | null;
+type DialogKind = "users" | "roles" | "models" | "embed" | "api-keys" | "prompt" | "memory" | null;
 
 const KIND_EVENT: Record<Exclude<DialogKind, null>, string> = {
   users: "admin:open-users",
+  roles: "admin:open-roles",
   models: "admin:open-models",
   embed: "admin:open-embed",
   "api-keys": "admin:open-api-keys",
@@ -46,6 +48,7 @@ export function AdminPanelHost() {
     }
     const handlers: Record<Exclude<DialogKind, null>, () => void> = {
       users: open("users"),
+      roles: open("roles"),
       models: open("models"),
       embed: open("embed"),
       "api-keys": open("api-keys"),
@@ -77,6 +80,7 @@ export function AdminPanelHost() {
   return (
     <>
       <UsersDialog open={open === "users"} onClose={close} />
+      <RolesDialog open={open === "roles"} onClose={close} />
       <ModelsDialog open={open === "models"} onClose={close} />
       <EmbedAdminDialog open={open === "embed"} onClose={close} />
       <ApiKeysDialog open={open === "api-keys"} onClose={close} />

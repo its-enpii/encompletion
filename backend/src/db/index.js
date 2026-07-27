@@ -578,17 +578,65 @@ function migrate() {
       ON project_memory_facts(project_id, key);
   `);
 
-  // Role → model RBAC. Empty set for a role means "all enabled models"
-  // (legacy default). Admin UI can pin a subset so members only see /
-  // may run those keys. role is users.role ('admin' | 'member').
+  // App roles (users.role slugs). Platform admin stays the literal
+  // slug 'admin' (requireAdmin + ownership SQL). Other rows are for
+  // model RBAC + assignment only — no platform powers.
   db.exec(`
-    CREATE TABLE IF NOT EXISTS role_models (
-      role       TEXT NOT NULL CHECK(role IN ('admin', 'member')),
-      model_key  TEXT NOT NULL,
-      PRIMARY KEY (role, model_key)
+    CREATE TABLE IF NOT EXISTS roles (
+      id          TEXT PRIMARY KEY,
+      label       TEXT NOT NULL,
+      is_system   INTEGER NOT NULL DEFAULT 0,
+      sort_order  INTEGER NOT NULL DEFAULT 0,
+      created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
     );
-    CREATE INDEX IF NOT EXISTS idx_role_models_role ON role_models(role);
   `);
+  // Seed built-ins. INSERT OR IGNORE keeps re-runs idempotent.
+  const insRole = db.prepare(
+    `INSERT OR IGNORE INTO roles (id, label, is_system, sort_order) VALUES (?, ?, ?, ?)`
+  );
+  insRole.run('admin', 'Admin', 1, 0);
+  insRole.run('member', 'Member', 1, 1);
+
+  // Role → model RBAC. Empty set for a role = unrestricted (all enabled).
+  // Older DBs had CHECK(role IN ('admin','member')); rebuild if present
+  // so custom role slugs can hold grants.
+  {
+    const rmExists = db
+      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='role_models'`)
+      .get();
+    if (!rmExists) {
+      db.exec(`
+        CREATE TABLE role_models (
+          role       TEXT NOT NULL,
+          model_key  TEXT NOT NULL,
+          PRIMARY KEY (role, model_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_role_models_role ON role_models(role);
+      `);
+    } else {
+      const sql = db
+        .prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='role_models'`)
+        .get()?.sql || '';
+      if (/CHECK\s*\(\s*role\s+IN/i.test(sql)) {
+        db.exec(`
+          BEGIN;
+          CREATE TABLE role_models_new (
+            role       TEXT NOT NULL,
+            model_key  TEXT NOT NULL,
+            PRIMARY KEY (role, model_key)
+          );
+          INSERT OR IGNORE INTO role_models_new (role, model_key)
+            SELECT role, model_key FROM role_models;
+          DROP TABLE role_models;
+          ALTER TABLE role_models_new RENAME TO role_models;
+          CREATE INDEX IF NOT EXISTS idx_role_models_role ON role_models(role);
+          COMMIT;
+        `);
+      } else {
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_role_models_role ON role_models(role);`);
+      }
+    }
+  }
 }
 
 migrate();

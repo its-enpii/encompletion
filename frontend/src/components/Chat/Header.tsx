@@ -279,6 +279,7 @@ export function ChatHeader({
           onChange={onChangeModel}
           open={modelOpen}
           setOpen={(o) => { setModelOpen(o); if (o) setEffortOpen(false); }}
+          searchable={modelOptions.length > 8}
         />
       </div>
     </header>
@@ -293,6 +294,7 @@ function SelectPill({
   onChange,
   open,
   setOpen,
+  searchable = false,
 }: {
   label: string;
   value: string;
@@ -301,12 +303,19 @@ function SelectPill({
   onChange: (v: string) => void;
   open: boolean;
   setOpen: (v: boolean) => void;
+  /** Show typeahead when the list is long (model picker). */
+  searchable?: boolean;
 }) {
   const current = options.find((o) => o.value === value);
   const ref = useRef<HTMLDivElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setQuery("");
+      return;
+    }
     function onDoc(e: MouseEvent) {
       if (!ref.current?.contains(e.target as Node)) setOpen(false);
     }
@@ -315,15 +324,31 @@ function SelectPill({
     }
     document.addEventListener("mousedown", onDoc);
     document.addEventListener("keydown", onKey);
+    // Focus search on open so typing filters immediately.
+    if (searchable) {
+      requestAnimationFrame(() => searchRef.current?.focus());
+    }
     return () => {
       document.removeEventListener("mousedown", onDoc);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open, setOpen]);
+  }, [open, setOpen, searchable]);
+
+  const q = query.trim().toLowerCase();
+  const filtered =
+    searchable && q
+      ? options.filter(
+          (o) =>
+            o.label.toLowerCase().includes(q) ||
+            o.value.toLowerCase().includes(q)
+        )
+      : options;
 
   const activeTone = tone === "saffron"
     ? "border-[var(--saffron)] bg-[var(--saffron-50)] text-[var(--saffron-500)]"
     : "border-[var(--magenta)] bg-[var(--magenta-50)] text-[var(--magenta-700)]";
+
+  const panelWidth = searchable ? "w-72" : "w-52";
 
   return (
     <div ref={ref} className="relative">
@@ -332,18 +357,18 @@ function SelectPill({
         onClick={() => setOpen(!open)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className={`group inline-flex h-9 items-center gap-1.5 rounded-[var(--r-md)] border px-3 text-xs font-semibold transition-all ${
+        className={`group inline-flex h-9 max-w-[14rem] items-center gap-1.5 rounded-[var(--r-md)] border px-3 text-xs font-semibold transition-all ${
           open
             ? activeTone + " shadow-[var(--shadow-focus)]"
             : "border-[var(--line)] bg-[var(--paper-3)] text-[var(--ink-2)] hover:-translate-y-0.5 hover:border-[var(--line-strong)] hover:text-[var(--ink)] hover:shadow-[var(--shadow-2)]"
         }`}
       >
-        <span className={`text-[10px] uppercase tracking-[0.08em] ${open ? "" : "text-[var(--ink-3)]"}`}>{label}</span>
-        <span className={`h-0.5 w-0.5 rounded-full ${tone === "saffron" ? "bg-[var(--saffron-300)]" : "bg-[var(--magenta-300)]"}`} />
-        <span>{current?.label || value}</span>
+        <span className={`shrink-0 text-[10px] uppercase tracking-[0.08em] ${open ? "" : "text-[var(--ink-3)]"}`}>{label}</span>
+        <span className={`h-0.5 w-0.5 shrink-0 rounded-full ${tone === "saffron" ? "bg-[var(--saffron-300)]" : "bg-[var(--magenta-300)]"}`} />
+        <span className="min-w-0 truncate">{current?.label || value}</span>
         <svg
           viewBox="0 0 24 24"
-          className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`}
+          className={`h-3 w-3 shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
           fill="none"
           stroke="currentColor"
           strokeWidth="2.5"
@@ -354,39 +379,69 @@ function SelectPill({
         </svg>
       </button>
       {open && (
-        <ul
-          role="listbox"
-          className="anim-scale-in absolute right-0 top-full z-30 mt-1.5 w-52 overflow-hidden rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-3)] py-1 shadow-[var(--shadow-4)]"
+        <div
+          className={`anim-scale-in absolute right-0 top-full z-30 mt-1.5 ${panelWidth} overflow-hidden rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-3)] shadow-[var(--shadow-4)]`}
         >
           <div className="border-b border-[var(--line)] bg-[var(--paper-2)] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--ink-3)]">
             Pilih {label}
           </div>
-          {options.map((o) => {
-            const isSel = o.value === value;
-            return (
-              <li key={o.value} role="option" aria-selected={isSel}>
-                <button
-                  type="button"
-                  onClick={() => { onChange(o.value); setOpen(false); }}
-                  className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-[13px] transition-colors ${
-                    isSel
-                      ? tone === "saffron"
-                        ? "bg-[var(--saffron-50)] text-[var(--saffron-500)]"
-                        : "bg-[var(--magenta-50)] text-[var(--magenta-700)]"
-                      : "text-[var(--ink-2)] hover:bg-[var(--paper-2)] hover:text-[var(--ink)]"
-                  }`}
-                >
-                  <span>{o.label}</span>
-                  {isSel && (
-                    <svg viewBox="0 0 24 24" className={`h-3.5 w-3.5 ${tone === "saffron" ? "text-[var(--saffron-500)]" : "text-[var(--magenta-600)]"}`} fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                  )}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+          {searchable && (
+            <div className="border-b border-[var(--line)] px-2 py-1.5">
+              <input
+                ref={searchRef}
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Cari model…"
+                className="w-full rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--paper)] px-2 py-1.5 text-[12px] text-[var(--ink)] outline-none placeholder:text-[var(--ink-3)] focus:border-[var(--magenta-300)]"
+                onKeyDown={(e) => {
+                  // Keep typing from bubbling to global shortcuts.
+                  e.stopPropagation();
+                  if (e.key === "Enter" && filtered[0]) {
+                    onChange(filtered[0].value);
+                    setOpen(false);
+                  }
+                }}
+              />
+            </div>
+          )}
+          <ul role="listbox" className="max-h-64 overflow-y-auto py-1">
+            {filtered.length === 0 ? (
+              <li className="px-3 py-2 text-[12px] text-[var(--ink-3)]">Tidak ada hasil</li>
+            ) : (
+              filtered.map((o) => {
+                const isSel = o.value === value;
+                return (
+                  <li key={o.value} role="option" aria-selected={isSel}>
+                    <button
+                      type="button"
+                      onClick={() => { onChange(o.value); setOpen(false); }}
+                      className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-[13px] transition-colors ${
+                        isSel
+                          ? tone === "saffron"
+                            ? "bg-[var(--saffron-50)] text-[var(--saffron-500)]"
+                            : "bg-[var(--magenta-50)] text-[var(--magenta-700)]"
+                          : "text-[var(--ink-2)] hover:bg-[var(--paper-2)] hover:text-[var(--ink)]"
+                      }`}
+                    >
+                      <span className="min-w-0 truncate">
+                        <span className="block truncate">{o.label}</span>
+                        {searchable && o.label !== o.value && (
+                          <span className="block truncate font-mono text-[10px] text-[var(--ink-3)]">{o.value}</span>
+                        )}
+                      </span>
+                      {isSel && (
+                        <svg viewBox="0 0 24 24" className={`h-3.5 w-3.5 shrink-0 ${tone === "saffron" ? "text-[var(--saffron-500)]" : "text-[var(--magenta-600)]"}`} fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      )}
+                    </button>
+                  </li>
+                );
+              })
+            )}
+          </ul>
+        </div>
       )}
     </div>
   );

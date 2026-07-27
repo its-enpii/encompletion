@@ -10,6 +10,7 @@ import projectsRouter from './routes/projects.js';
 import authRouter from './routes/auth.js';
 import attachmentsRouter from './routes/attachments.js';
 import usersRouter from './routes/users.js';
+import rolesRouter from './routes/roles.js';
 import skillsRouter from './routes/skills.js';
 import modelsRouter from './routes/models.js';
 import artifactsRouter from './routes/artifacts.js';
@@ -78,6 +79,7 @@ app.get('/api/health', (_req, res) => {
 
 app.use('/api/auth', authRouter);
 app.use('/api/users', requireAuth, usersRouter);
+app.use('/api/roles', requireAuth, rolesRouter);
 app.use('/api/sessions', requireAuth, sessionsRouter);
 app.use('/api/projects', requireAuth, projectsRouter);
 app.use('/api/attachments', requireAuth, attachmentsRouter);

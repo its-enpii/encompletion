@@ -22,12 +22,14 @@ type User = {
   id: number;
   username: string;
   display_name: string | null;
-  role: "admin" | "member";
+  role: string;
   disabled: boolean;
   created_at: string;
   updated_at: string | null;
   last_login_at: string | null;
 };
+
+type RoleOption = { id: string; label: string };
 
 type ModalKind =
   | { kind: "create" }
@@ -45,8 +47,12 @@ export function UsersDialog({ open, onClose }: { open: boolean; onClose: () => v
 
   const [view, setView] = useState<"table" | "cards">("table");
   const [search, setSearch] = useState("");
-  const [roleFilter, setRoleFilter] = useState<"all" | "admin" | "member">("all");
+  const [roleFilter, setRoleFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "disabled">("all");
+  const [roleOptions, setRoleOptions] = useState<RoleOption[]>([
+    { id: "member", label: "Member" },
+    { id: "admin", label: "Admin" },
+  ]);
 
   // Pagination. Backend hits `/api/users?limit=N&offset=M&q=...&sort=...
   // &dir=...` (see backend/src/routes/users.js). Total comes from
@@ -68,7 +74,10 @@ export function UsersDialog({ open, onClose }: { open: boolean; onClose: () => v
       // counts are tiny — keeps the SQL simple and the FE in sync
       // with the existing filter UX.
       if (search.trim()) qs.set("q", search.trim());
-      const r = await authFetch(`/api/users?${qs.toString()}`);
+      const [r, rRoles] = await Promise.all([
+        authFetch(`/api/users?${qs.toString()}`),
+        authFetch("/api/roles"),
+      ]);
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
         throw new Error(d.error || `HTTP ${r.status}`);
@@ -76,6 +85,18 @@ export function UsersDialog({ open, onClose }: { open: boolean; onClose: () => v
       const data = await r.json();
       setUsers(data.users || []);
       setTotal(typeof data.total === "number" ? data.total : 0);
+      if (rRoles.ok) {
+        const rd = await rRoles.json().catch(() => ({}));
+        const list = Array.isArray(rd.roles) ? rd.roles : [];
+        if (list.length) {
+          setRoleOptions(
+            list.map((x: { id: string; label?: string }) => ({
+              id: x.id,
+              label: x.label || x.id,
+            }))
+          );
+        }
+      }
     } catch (e: any) {
       setError(e.message || "failed to load");
     } finally {
@@ -261,8 +282,7 @@ export function UsersDialog({ open, onClose }: { open: boolean; onClose: () => v
                 </div>
                 <PillsFilter label="Role" value={roleFilter} options={[
                   { value: "all", label: "All" },
-                  { value: "admin", label: "Admin" },
-                  { value: "member", label: "Member" },
+                  ...roleOptions.map((r) => ({ value: r.id, label: r.label })),
                 ]} onChange={setRoleFilter} />
                 <PillsFilter label="Status" value={statusFilter} options={[
                   { value: "all", label: "All" },
@@ -431,6 +451,7 @@ export function UsersDialog({ open, onClose }: { open: boolean; onClose: () => v
 
       <UserDialog
         value={modal}
+        roleOptions={roleOptions}
         onClose={() => setModal(null)}
         onSubmit={async (payload) => {
           if (!modal) return;
@@ -647,9 +668,10 @@ function UserCard({
 // ---- UserDialog (create/edit/reset forms) --------------------------------
 
 function UserDialog({
-  value, onClose, onSubmit,
+  value, roleOptions, onClose, onSubmit,
 }: {
   value: ModalKind | null;
+  roleOptions: RoleOption[];
   onClose: () => void;
   onSubmit: (payload: unknown) => Promise<void>;
 }) {
@@ -666,18 +688,37 @@ function UserDialog({
       }
       widthClass="max-w-md"
     >
-      {value.kind === "create" && <CreateForm onCancel={onClose} onSubmit={onSubmit} />}
-      {value.kind === "edit" && <EditForm user={value.user} isSelf={value.isSelf} onCancel={onClose} onSubmit={onSubmit} />}
+      {value.kind === "create" && (
+        <CreateForm roleOptions={roleOptions} onCancel={onClose} onSubmit={onSubmit} />
+      )}
+      {value.kind === "edit" && (
+        <EditForm
+          user={value.user}
+          isSelf={value.isSelf}
+          roleOptions={roleOptions}
+          onCancel={onClose}
+          onSubmit={onSubmit}
+        />
+      )}
       {value.kind === "reset" && <ResetForm user={value.user} onCancel={onClose} onSubmit={onSubmit} />}
     </CenteredDialog>
   );
 }
 
-function CreateForm({ onCancel, onSubmit }: { onCancel: () => void; onSubmit: (payload: unknown) => Promise<void> }) {
+function CreateForm({
+  roleOptions,
+  onCancel,
+  onSubmit,
+}: {
+  roleOptions: RoleOption[];
+  onCancel: () => void;
+  onSubmit: (payload: unknown) => Promise<void>;
+}) {
+  const defaultRole = roleOptions.find((r) => r.id === "member")?.id || roleOptions[0]?.id || "member";
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<"admin" | "member">("member");
+  const [role, setRole] = useState(defaultRole);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -699,9 +740,10 @@ function CreateForm({ onCancel, onSubmit }: { onCancel: () => void; onSubmit: (p
       <TextField label="Password (min 6)" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
       <div>
         <label className="label mb-1.5 block">Role</label>
-        <select value={role} onChange={(e) => setRole(e.target.value as "admin" | "member")} className="input">
-          <option value="member">member</option>
-          <option value="admin">admin</option>
+        <select value={role} onChange={(e) => setRole(e.target.value)} className="input">
+          {roleOptions.map((r) => (
+            <option key={r.id} value={r.id}>{r.label} ({r.id})</option>
+          ))}
         </select>
       </div>
       {err && (
@@ -719,12 +761,29 @@ function CreateForm({ onCancel, onSubmit }: { onCancel: () => void; onSubmit: (p
   );
 }
 
-function EditForm({ user, isSelf, onCancel, onSubmit }: { user: User; isSelf: boolean; onCancel: () => void; onSubmit: (payload: unknown) => Promise<void> }) {
+function EditForm({
+  user,
+  isSelf,
+  roleOptions,
+  onCancel,
+  onSubmit,
+}: {
+  user: User;
+  isSelf: boolean;
+  roleOptions: RoleOption[];
+  onCancel: () => void;
+  onSubmit: (payload: unknown) => Promise<void>;
+}) {
   const [displayName, setDisplayName] = useState(user.display_name || "");
-  const [role, setRole] = useState<"admin" | "member">(user.role);
+  const [role, setRole] = useState(user.role);
   const [disabled, setDisabled] = useState(user.disabled);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Ensure current role appears even if somehow missing from options.
+  const options = roleOptions.some((r) => r.id === user.role)
+    ? roleOptions
+    : [{ id: user.role, label: user.role }, ...roleOptions];
 
   async function submit() {
     setBusy(true);
@@ -742,9 +801,10 @@ function EditForm({ user, isSelf, onCancel, onSubmit }: { user: User; isSelf: bo
       <TextField label="Display name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
       <div>
         <label className="label mb-1.5 block">Role</label>
-        <select value={role} onChange={(e) => setRole(e.target.value as "admin" | "member")} disabled={isSelf} className="input">
-          <option value="member">member</option>
-          <option value="admin">admin</option>
+        <select value={role} onChange={(e) => setRole(e.target.value)} disabled={isSelf} className="input">
+          {options.map((r) => (
+            <option key={r.id} value={r.id}>{r.label} ({r.id})</option>
+          ))}
         </select>
         {isSelf && <p className="mt-1 text-xs text-[var(--ink-3)]">Tidak bisa ubah role sendiri.</p>}
       </div>

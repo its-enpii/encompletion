@@ -50,13 +50,15 @@ export function ModelsDialog({ open, onClose }: { open: boolean; onClose: () => 
     { kind: "create" } | { kind: "edit"; model: Model } | null
   >(null);
   const [importing, setImporting] = useState(false);
-  const [grants, setGrants] = useState<{ admin: string[]; member: string[] }>({
+  const [roleIds, setRoleIds] = useState<string[]>(["admin", "member"]);
+  const [grants, setGrants] = useState<Record<string, string[]>>({
     admin: [],
     member: [],
   });
-  const [grantRole, setGrantRole] = useState<"member" | "admin">("member");
+  const [grantRole, setGrantRole] = useState<string>("member");
   const [grantDraft, setGrantDraft] = useState<string[]>([]);
   const [grantBusy, setGrantBusy] = useState(false);
+  const [grantQuery, setGrantQuery] = useState("");
 
   async function load() {
     setLoading(true);
@@ -73,12 +75,18 @@ export function ModelsDialog({ open, onClose }: { open: boolean; onClose: () => 
       setModels(await rModels.json());
       if (rGrants.ok) {
         const g = await rGrants.json();
-        const next = {
-          admin: Array.isArray(g?.grants?.admin) ? g.grants.admin : [],
-          member: Array.isArray(g?.grants?.member) ? g.grants.member : [],
-        };
+        const ids: string[] = Array.isArray(g?.roles) && g.roles.length
+          ? g.roles.map(String)
+          : ["admin", "member"];
+        setRoleIds(ids);
+        const next: Record<string, string[]> = {};
+        for (const id of ids) {
+          next[id] = Array.isArray(g?.grants?.[id]) ? g.grants[id] : [];
+        }
         setGrants(next);
-        setGrantDraft(next[grantRole] || []);
+        const active = ids.includes(grantRole) ? grantRole : ids.includes("member") ? "member" : ids[0];
+        setGrantRole(active);
+        setGrantDraft(next[active] || []);
       }
     } catch (e: any) {
       setError(e.message || "failed to load");
@@ -317,11 +325,12 @@ export function ModelsDialog({ open, onClose }: { open: boolean; onClose: () => 
                 <div className="flex items-center gap-2">
                   <select
                     value={grantRole}
-                    onChange={(e) => setGrantRole(e.target.value as "member" | "admin")}
+                    onChange={(e) => setGrantRole(e.target.value)}
                     className="rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--paper)] px-2 py-1 text-sm"
                   >
-                    <option value="member">member</option>
-                    <option value="admin">admin</option>
+                    {roleIds.map((id) => (
+                      <option key={id} value={id}>{id}</option>
+                    ))}
                   </select>
                   <Button variant="primary" size="sm" onClick={saveRoleGrants} disabled={grantBusy}>
                     {grantBusy ? "Menyimpan…" : "Simpan akses"}
@@ -330,15 +339,33 @@ export function ModelsDialog({ open, onClose }: { open: boolean; onClose: () => 
               </div>
               {grantDraft.length === 0 ? (
                 <div className="mb-2 rounded-[var(--r-sm)] border border-[var(--success)]/30 bg-[var(--success-50)] px-2 py-1.5 text-[11px] text-[var(--success)]">
-                  Mode unrestricted untuk <strong>{grantRole}</strong> — semua model enabled boleh dipakai.
+                  Mode unrestricted untuk <strong>{grantRole}</strong>: semua model enabled boleh dipakai.
                 </div>
               ) : (
                 <div className="mb-2 text-[11px] text-[var(--ink-3)]">
                   {grantDraft.length} model dipilih untuk <strong>{grantRole}</strong>
                 </div>
               )}
-              <div className="grid max-h-48 gap-1 overflow-auto sm:grid-cols-2 lg:grid-cols-3">
-                {models.map((m) => (
+              <div className="mb-2">
+                <input
+                  type="search"
+                  value={grantQuery}
+                  onChange={(e) => setGrantQuery(e.target.value)}
+                  placeholder="Cari model (label atau key)…"
+                  className="w-full rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--paper)] px-2 py-1.5 text-xs text-[var(--ink)] outline-none placeholder:text-[var(--ink-3)] focus:border-[var(--magenta-300)]"
+                />
+              </div>
+              <div className="grid max-h-64 gap-1 overflow-auto sm:grid-cols-2 lg:grid-cols-3">
+                {models
+                  .filter((m) => {
+                    const q = grantQuery.trim().toLowerCase();
+                    if (!q) return true;
+                    return (
+                      m.label.toLowerCase().includes(q) ||
+                      m.key.toLowerCase().includes(q)
+                    );
+                  })
+                  .map((m) => (
                   <label
                     key={m.id}
                     className={`flex cursor-pointer items-center gap-2 rounded-[var(--r-sm)] border px-2 py-1.5 text-xs ${

@@ -7,7 +7,7 @@ import { Pill } from "@/components/ui/Pill";
 export type AuthUser = {
   username: string;
   display_name?: string | null;
-  role: "admin" | "member";
+  role: string;
 };
 
 /**
@@ -110,6 +110,11 @@ export function UserMenu({ user, onLogout, collapsed = false }: { user: AuthUser
                 onClick={() => { setOpen(false); openAdmin("admin:open-users"); }}
               />
               <Item
+                icon={<ShieldIcon className="h-3.5 w-3.5" />}
+                label="Roles"
+                onClick={() => { setOpen(false); openAdmin("admin:open-roles"); }}
+              />
+              <Item
                 icon={<CpuIcon className="h-3.5 w-3.5" />}
                 label="Models"
                 onClick={() => { setOpen(false); openAdmin("admin:open-models"); }}
@@ -193,6 +198,13 @@ function UsersIcon(props: React.SVGProps<SVGSVGElement>) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
       <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
       <circle cx="9" cy="7" r="4" />
+    </svg>
+  );
+}
+function ShieldIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
     </svg>
   );
 }

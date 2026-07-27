@@ -59,7 +59,7 @@ export function authFetch(input: string, init: RequestInit = {}) {
 export type AuthUser = {
   id: number;
   username: string;
-  role: "admin" | "member";
+  role: string;
   display_name?: string | null;
 };
 
