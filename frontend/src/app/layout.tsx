@@ -30,7 +30,7 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="id" className={`${inter.variable} ${jetbrains.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col">
+      <body className="flex min-h-dvh flex-col">
         <AuthProvider>
           <UiProvider>
             <ModelsProvider>

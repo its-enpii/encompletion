@@ -416,7 +416,7 @@ export default function Sidebar({
             ? ({ "--sb-w": "64px" } as React.CSSProperties)
             : ({ "--sb-w": "280px" } as React.CSSProperties)
         }
-className={`fixed inset-y-0 left-0 z-40 flex min-w-0 flex-col border-r border-[var(--line-dark)] bg-[var(--dark)] text-[var(--dark-text)] shadow-[var(--shadow-3)] transition-[transform,width,opacity] duration-150 ease-out md:sticky md:top-0 md:h-screen md:translate-x-0 w-[280px] md:w-[var(--sb-w)] ${
+className={`fixed inset-y-0 left-0 z-40 flex min-w-0 flex-col border-r border-[var(--line-dark)] bg-[var(--dark)] text-[var(--dark-text)] shadow-[var(--shadow-3)] transition-[transform,width,opacity] duration-150 ease-out md:sticky md:top-0 md:h-dvh md:translate-x-0 w-[280px] md:w-[var(--sb-w)] ${
           // Mobile drawer: open → translate-x-0, closed → -translate-x-full
           open
             ? "translate-x-0"

@@ -123,8 +123,9 @@ export function AppShell({
     setSidebarOpen(false);
   }, [pathname]);
 
+  // h-dvh: mobile Chrome address bar; h-screen (100vh) overshoots.
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[var(--paper)] text-[var(--ink)]">
+    <div className="flex h-dvh w-full max-w-[100vw] overflow-hidden bg-[var(--paper)] text-[var(--ink)]">
       <Sidebar
         activeSessionId={activeSessionId}
         onSelectSession={(s) => router.push(`/chat/${s.id}`)}

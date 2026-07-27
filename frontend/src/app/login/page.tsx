@@ -43,7 +43,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="grid min-h-screen w-screen lg:grid-cols-2">
+    <div className="grid min-h-dvh w-full max-w-[100vw] lg:grid-cols-2">
       {/* Left: visual panel */}
       <div className="relative hidden flex-col justify-between overflow-hidden bg-[var(--dark)] p-12 text-[var(--dark-text)] lg:flex">
         {/* Background pattern */}

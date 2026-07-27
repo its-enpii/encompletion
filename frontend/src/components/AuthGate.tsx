@@ -38,7 +38,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (loading || redirecting) {
     return (
-      <div className="grid min-h-screen w-screen place-items-center bg-[var(--paper)]">
+      <div className="grid min-h-dvh w-full max-w-[100vw] place-items-center bg-[var(--paper)]">
         <div className="flex flex-col items-center gap-5">
           <BrandMark size="lg" />
           <div className="flex items-center gap-2 text-sm text-[var(--ink-3)]">
