@@ -250,16 +250,38 @@ function readAttachmentAsDataUrl(att) {
 const GENERIC_PROMPT_RE = /^(halo|hai|hi|hello|hey|test|tes|ok|oke|okay|ya|yes|yoi|bro|broh|p|ping|\?+|!+|\.+|\s*)+$/i;
 function isGenericPrompt(prompt) {
   if (!prompt) return true;
-  const trimmed = prompt.trim();
+  const trimmed = prompt.trim().replace(/[.!?,…]+$/g, '').trim();
   if (trimmed.length === 0) return true;
-  if (trimmed.length < 4) return true;
+  if (trimmed.length < 3) return true;
   return GENERIC_PROMPT_RE.test(trimmed);
 }
 
-// Pull a short, useful title from the assistant's first reply. Strips
-// fenced code blocks and markdown headings, then takes the first sentence
-// or two-line segment, capped at 60 chars on a word boundary.
-function deriveTitle(replyText) {
+/** Cap a title on a word boundary (max 60 chars). */
+function clipTitle(text) {
+  if (!text || typeof text !== 'string') return null;
+  let candidate = text.replace(/\s+/g, ' ').trim();
+  if (candidate.length < 3) return null;
+  if (candidate.length > 60) {
+    const cut = candidate.lastIndexOf(' ', 57);
+    candidate = (cut > 20 ? candidate.slice(0, cut) : candidate.slice(0, 57)) + '…';
+  }
+  return candidate;
+}
+
+/**
+ * Prefer the user's first prompt as the session title (ChatGPT-style).
+ * Only fall back to the assistant reply when the prompt is a greeting
+ * or empty (image-only). Never put a clock/answer line in the chrome.
+ */
+function deriveTitleFromPrompt(prompt) {
+  if (isGenericPrompt(prompt)) return null;
+  const words = String(prompt).trim().split(/\s+/).slice(0, 10).join(' ');
+  return clipTitle(words);
+}
+
+// Fallback when the user only said "halo" / image-only: short phrase from
+// the assistant reply. Strips fences/markdown; first sentence, max 60.
+function deriveTitleFromReply(replyText) {
   if (!replyText || typeof replyText !== 'string') return null;
   const stripped = replyText
     .replace(/```[\s\S]*?```/g, ' ')
@@ -269,14 +291,9 @@ function deriveTitle(replyText) {
     .replace(/\s+/g, ' ')
     .trim();
   if (stripped.length < 4) return null;
-  // First sentence (split on . ! ? followed by space + uppercase, or newline).
   const sentenceMatch = stripped.match(/^.{1,60}?[.!?](?:\s|$)/);
   let candidate = sentenceMatch ? sentenceMatch[0].trim() : stripped.slice(0, 60);
-  // A short first sentence ("Bisa.", "OK.", "Sure.") is technically the
-  // reply's first beat but useless as a sidebar title. When the captured
-  // candidate is too short, drop the trailing punctuation and append the
-  // next phrase so the title describes what the assistant actually said.
-  const MIN_LEN = 20;
+  const MIN_LEN = 12;
   if (candidate.length < MIN_LEN && stripped.length > candidate.length) {
     const tail = stripped.slice(candidate.length).replace(/^[.!?\s]+/, '');
     const filler = tail.slice(0, MIN_LEN - candidate.length + 10).trim();
@@ -286,11 +303,7 @@ function deriveTitle(replyText) {
         .trim();
     }
   }
-  if (candidate.length > 60) {
-    candidate = candidate.slice(0, candidate.lastIndexOf(' ', 57)) + '…';
-  }
-  if (candidate.length < 4) return null;
-  return candidate;
+  return clipTitle(candidate);
 }
 
 /**
@@ -844,54 +857,28 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
       registry.emit(runId, 'artifact_rejections', { kept: detected.length, rejected: rejectedTotal, breakdown });
     }
 
-    // Session aggregate + auto-title.
-    // The literal prompt is usually a poor title ("Halo", "tes", "ok").
-    // Prefer, in order:
-    //   1. assistant's first reply, truncated — gives the actual topic
-    //   2. attachment filename, when the prompt was empty / image-only
-    //   3. a trimmed prompt that's at least 3 words and not a greeting
-    //   4. null (sidebar shows "Session #<id>" placeholder)
+    // Session aggregate + auto-title (first user turn only).
+    // Prefer user prompt (ChatGPT-style). Assistant reply only when the
+    // prompt is a greeting / empty — never put the AI answer in the chrome
+    // when the user already named the topic.
     //
-    // When to run: only on the FIRST user turn of a session. After that
-    // the user may have renamed it manually via the sidebar — we never
-    // overwrite that. Detection: count of persisted user messages. If
-    // it's exactly 1 (the one we just inserted), this is the first
-    // turn. (The check uses `db` directly because the in-memory
-    // dbSession object doesn't reflect the INSERT that ran just above.)
-    //
-    // Why this matters: the FE pre-fills the title with the prompt on
-    // /api/sessions POST so the new session is identifiable in the
-    // sidebar immediately. The old `!dbSession.title` guard skipped
-    // auto-title for those sessions — leaving them stuck at the literal
-    // prompt forever. Count-based detection restores the intent.
+    // Count-based first-turn detection: FE may pre-fill title on POST
+    // /sessions; we still overwrite once on turn 1 so navbar + sidebar match.
     const userMsgCount = db
       .prepare(`SELECT COUNT(*) AS n FROM messages WHERE session_id = ? AND role = 'user'`)
       .get(dbSession.id).n;
     const isFirstUserTurn = userMsgCount === 1;
     if (isFirstUserTurn && !isError) {
-      // Skip auto-derive when the run errored on the first turn — the
-      // FE is about to delete the whole session (see cleanup below),
-      // so deriving a title here is wasted work.
-      const replyTitle = deriveTitle(assistantFullText);
-      // Image-only send (no prompt text) — surface a generic label
-      // instead of the raw filename. The filename is technical metadata
-      // ("IMG_20260115_103847.png") and is rarely a good sidebar title.
-      // Once the assistant replies, the next turn's title logic kicks
-      // in via replyTitle; the placeholder here just keeps the sidebar
-      // human-readable while we wait.
+      const promptTitle = deriveTitleFromPrompt(safePrompt);
       const hasImages = Array.isArray(attachments) && attachments.length > 0;
       const imageOnly = hasImages && !safePrompt.trim();
       const attTitle = imageOnly
         ? attachments.length === 1
-          ? "Image"
+          ? 'Image'
           : `${attachments.length} images`
-        : attachments[0]?.file_name
-          ? attachments[0].file_name.replace(/\.[^.]+$/, '')
-          : null;
-      const promptTitle = isGenericPrompt(safePrompt)
-        ? null
-        : safePrompt.split(/\s+/).slice(0, 8).join(' ');
-      dbSession.title = replyTitle || attTitle || promptTitle || null;
+        : null;
+      const replyTitle = deriveTitleFromReply(assistantFullText);
+      dbSession.title = promptTitle || attTitle || replyTitle || null;
     }
 
     // Cleanup on error. The user asked: instead of leaving an empty

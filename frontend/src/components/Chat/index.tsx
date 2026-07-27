@@ -935,7 +935,10 @@ export default function Chat({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            title: text.slice(0, 80),
+            // Placeholder until first-run close derives a real title
+            // (prefer user prompt, not the assistant reply). Avoids
+            // navbar/sidebar mismatch from stuffing raw text here.
+            title: "New chat",
             model,
             project_id: projectId,
           }),
