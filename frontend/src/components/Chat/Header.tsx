@@ -107,7 +107,7 @@ export function ChatHeader({
   }
 
   return (
-    <header className="sticky top-0 z-10 flex h-16 items-center gap-3 border-b border-[var(--line)] bg-[var(--paper)]/80 px-4 backdrop-blur-xl">
+    <header className="z-10 flex h-16 shrink-0 items-center gap-3 border-b border-[var(--line)] bg-[var(--paper)]/80 px-4 backdrop-blur-xl">
       {/* Mobile hamburger — always shown below md. Toggles the drawer. */}
       <button
         type="button"

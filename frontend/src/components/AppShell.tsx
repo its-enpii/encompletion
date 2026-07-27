@@ -135,7 +135,7 @@ export function AppShell({
         mode={renderMode}
         onCycleMode={cycleMode}
       />
-      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {children}
       </main>
       {/* Admin overlays — render nothing until dispatched via window

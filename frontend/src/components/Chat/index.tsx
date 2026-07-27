@@ -1192,7 +1192,10 @@ export default function Chat({
   // The composable chat area.
   const chatArea = (
     <div
-      className="relative flex h-full min-w-0 flex-1 flex-col bg-[var(--paper)]"
+      // min-h-0 + overflow-hidden: only MessageList scrolls. Without min-h-0,
+      // flex-1 children grow past the dvh shell and the whole page scrolls
+      // (composer slips under the mobile Chrome address bar).
+      className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[var(--paper)]"
       onDragEnter={(e) => {
         if (!e.dataTransfer?.types?.includes("Files")) return;
         pageDragDepth.current += 1;

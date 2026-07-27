@@ -74,7 +74,7 @@ export function MessageList({
         const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
         onScroll(gap);
       }}
-      className="relative flex-1 overflow-y-auto bg-[var(--paper)]"
+      className="relative min-h-0 flex-1 overflow-y-auto overscroll-y-contain bg-[var(--paper)]"
     >
       <div className="mx-auto flex max-w-3xl flex-col gap-7 px-4 py-10">
         {messages.length === 0 && !streaming && sessionId == null && <EmptyHero />}

@@ -140,6 +140,7 @@
 
 /* ---------- Base ---------- */
 html, body {
+  height: 100%;
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -147,6 +148,10 @@ html, body {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   font-feature-settings: "cv11", "ss01", "ss03";
+}
+/* App shell owns the viewport; body must not scroll on mobile chat. */
+html, body {
+  overflow: hidden;
 }
 body {
   background:

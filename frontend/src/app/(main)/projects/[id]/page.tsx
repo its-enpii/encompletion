@@ -12,7 +12,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   return (
     <>
       <div className="flex h-full min-h-0 flex-1">
-        <div className="flex min-w-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1">
           <Chat hideSidebar initialProjectId={projectId} />
         </div>
         <ProjectConfigPanel projectId={projectId} />

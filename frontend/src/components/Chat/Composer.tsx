@@ -88,7 +88,7 @@ export function Composer({
   }
 
   return (
-    <div className="border-t border-[var(--line)] bg-gradient-to-t from-[var(--paper-2)] to-[var(--paper)] px-3 pb-4 pt-3">
+    <div className="shrink-0 border-t border-[var(--line)] bg-gradient-to-t from-[var(--paper-2)] to-[var(--paper)] px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
       <div className="mx-auto max-w-3xl">
         {pendingAtts.length > 0 && (
           <div className="mb-2.5 flex flex-wrap gap-2 anim-fade-in">
