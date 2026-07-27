@@ -30,60 +30,47 @@ import { renderRecalledContextBlock } from "./recalled.js";
 import { renderSessionSummaryBlock } from "./summarized.js";
 import db from "./db/index.js";
 
-const SYSTEM_PROMPT = `You are a coding assistant. You have read/write
-access to a working directory via the provided tools. Prefer small,
-focused changes. Always read a file before editing it unless the user
-provided the full contents verbatim. Keep prose concise.
+// Chat-web product (Claude/ChatGPT/Gemini style) — not a coding agent.
+// File tools exist only as a workspace for drafting multi-file artifacts.
+// Shell/Bash is not offered to the model.
+const SYSTEM_PROMPT = `You are a helpful chat assistant in a web conversation UI
+(like Claude, ChatGPT, or Gemini). Answer clearly. Prefer natural prose.
+You are not a coding agent and you cannot run shell commands or operate a
+developer terminal.
 
-You also have Skill.list and Skill.read tools. When a user request
-matches a skill's description, call Skill.list first to confirm the
-catalog, then Skill.read to load the full procedure before acting.
-This mirrors the same scoped-procedure workflow Claude Code skills
-provide, but invoked explicitly via tool calls.
+When the user wants a sizable deliverable (HTML page, React component, SVG,
+markdown doc, config, script, table), publish it with EmitArtifact so it
+opens in the artifact panel. Pass {type, title, language?, content}. Skip
+EmitArtifact for short inline examples that only illustrate a sentence.
+When you EmitArtifact, do not also paste the full content as a fenced code
+block — describe what you published and let the panel show the body.
 
-WebFetch: when the user asks about a public URL, current events,
-library versions, or anything your training data may be stale or
-wrong about, call WebFetch to look it up before answering. Prefer
-looking up the specific URL the user mentioned (or implied — e.g.
-"the latest docs") rather than guessing. If the user explicitly says
-"don't look it up" or the question is purely from prior knowledge,
-skip the fetch. Cite the URL you fetched in your reply so the user
-can verify.
+Workspace tools (Read/Write/Edit/Glob/Grep) are only for drafting multi-file
+artifacts inside the session workspace before publishing with EmitArtifact.
+Do not treat the workspace as a project repo to "build" or "run". Prefer
+EmitArtifact directly when a single file is enough.
 
-Artifacts: you have an EmitArtifact tool. Use it to publish any
-substantive output the user will want to preview, copy, save, or
-render — a complete file's full contents, a UI snippet they would
-open in a browser, a config blob, a markdown doc, etc. Pass
-{type, title, language?, content}. Skip it for short syntax examples
-or short snippets that are only there to illustrate a sentence in
-prose. Do NOT also dump the same content into a fenced code block
-in your reply when you call EmitArtifact — the artifact panel is the
-view; your reply text should just describe what was published.
+Skill.list / Skill.read: if a skill matches the request, list then read it
+and follow its procedure.
 
-When you finish a turn, do NOT emit a closing "ask for next" — wait
-for the user's next message.`;
+Web research:
+- WebSearch: open-ended questions, news, facts you may not know, "what's the
+  latest…". Call it before guessing. Then WebFetch 1–2 best URLs if you need
+  full page text. Cite sources with URLs in your reply.
+- WebFetch: when the user already named a URL, or after WebSearch when a
+  specific page must be read. Skip either tool if the user says not to look
+  it up, or the answer is pure prior knowledge.
+
+When you finish a turn, do not ask for the next task — wait for the user.`;
 
 const TOOLS = [
   {
     type: "function",
     function: {
-      name: "Bash",
-      description: "Run a shell command. Returns combined stdout/stderr. Use for git, ls, grep, build/test invocations.",
-      parameters: {
-        type: "object",
-        properties: {
-          command: { type: "string", description: "The shell command to execute." },
-          deadline_ms: { type: "integer" },
-        },
-        required: ["command"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
       name: "Read",
-      description: "Read a file from disk. Files larger than ~4MB require start_line/end_line.",
+      description:
+        "Read a file from the session artifact workspace. Use while drafting " +
+        "multi-file artifacts. Files larger than ~4MB require start_line/end_line.",
       parameters: {
         type: "object",
         properties: {
@@ -99,7 +86,9 @@ const TOOLS = [
     type: "function",
     function: {
       name: "Write",
-      description: "Write content to a file, replacing any existing contents. Refuses to write outside the working directory.",
+      description:
+        "Write a file in the session artifact workspace (draft material for " +
+        "artifacts). Not a project checkout — publish finished work via EmitArtifact.",
       parameters: {
         type: "object",
         properties: {
@@ -114,7 +103,9 @@ const TOOLS = [
     type: "function",
     function: {
       name: "Edit",
-      description: "Search-and-replace edit. old_string must match exactly once unless replace_all=true.",
+      description:
+        "Search-and-replace in a workspace draft file. old_string must match " +
+        "exactly once unless replace_all=true.",
       parameters: {
         type: "object",
         properties: {
@@ -131,7 +122,7 @@ const TOOLS = [
     type: "function",
     function: {
       name: "Glob",
-      description: "List files matching a glob pattern.",
+      description: "List workspace draft files matching a glob pattern.",
       parameters: {
         type: "object",
         properties: { pattern: { type: "string" } },
@@ -143,7 +134,7 @@ const TOOLS = [
     type: "function",
     function: {
       name: "Grep",
-      description: "Search file contents with regex.",
+      description: "Search workspace draft file contents with regex.",
       parameters: {
         type: "object",
         properties: {
@@ -158,13 +149,34 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "WebSearch",
+      description:
+        "Search the public web and return top result titles, URLs, and " +
+        "snippets. Use for open-ended research, current events, or facts " +
+        "that may be outside training data. After searching, use WebFetch " +
+        "on specific URLs when you need full page content. Always cite URLs.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Search query." },
+          max_results: {
+            type: "integer",
+            description: "How many results to return (1–10, default 5).",
+          },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "WebFetch",
       description:
-        "Fetch a URL over HTTP(S) and return the response body as text. " +
-        "HTML is stripped to plain text; JSON / XML / text are returned as-is. " +
-        "Use this when the user asks you to read a webpage, check a public " +
-        "API, or pull down documentation. Only http(s) URLs are allowed; " +
-        "private / loopback addresses are rejected.",
+        "Fetch a public http(s) URL and return the body as text. HTML is " +
+        "stripped to plain text. Use for pages, public APIs, or docs the user " +
+        "asks about — or after WebSearch when a result needs a full read. " +
+        "Private/loopback addresses are rejected.",
       parameters: {
         type: "object",
         properties: {
@@ -180,14 +192,9 @@ const TOOLS = [
     function: {
       name: "EmitArtifact",
       description:
-        "Publish a code block, document, or other sizable output as an " +
-        "artifact the user can preview, copy, save, or render in the chat " +
-        "side panel. Use this whenever your reply contains something the " +
-        "user is likely to want as a standalone object — a complete file's " +
-        "contents, a UI snippet the user would preview in a browser, a " +
-        "config blob they want to save, etc. Do NOT call this for tiny " +
-        "one-liner syntax examples or for fenced blocks that are just " +
-        "illustrating a sentence in prose.",
+        "Publish a deliverable to the chat artifact panel (preview, copy, " +
+        "save, render). Use for complete files, UI snippets, configs, docs. " +
+        "Not for tiny one-liner examples that only illustrate prose.",
       parameters: {
         type: "object",
         properties: {
@@ -195,26 +202,20 @@ const TOOLS = [
             type: "string",
             enum: ["html", "react", "svg", "markdown", "code"],
             description:
-              "How the artifact should be rendered. Use 'html' for full " +
-              "documents, 'react' for JSX/TSX components, 'svg' for vector " +
-              "graphics, 'markdown' for prose docs, 'code' for everything " +
-              "else (JSON, YAML, scripts, etc.).",
+              "Render mode: html, react (JSX/TSX), svg, markdown, or code " +
+              "(JSON/YAML/scripts/etc.).",
           },
           title: {
             type: "string",
-            description:
-              "Short label for the artifact card (e.g. 'login.html', " +
-              "'UserCard.tsx'). Keep it under 80 chars.",
+            description: "Short card label (e.g. login.html). Under 80 chars.",
           },
           language: {
             type: "string",
-            description:
-              "Original language identifier if 'type' is 'code' " +
-              "(e.g. 'python', 'rust', 'json').",
+            description: "Language id when type is code (e.g. python, json).",
           },
           content: {
             type: "string",
-            description: "The full content of the artifact.",
+            description: "Full artifact body.",
           },
         },
         required: ["type", "title", "content"],
@@ -583,21 +584,27 @@ export function runLLM(prompt, opts = {}, onEvent) {
               external_user_id: opts.externalUserId,
               session_id: opts.sessionId,
             });
-          } else if (tc.name === "Bash" && opts.embedDispatch && opts.capability && opts.capability.allow_bash === false) {
-            // Embed mode bash gating: tenants with allow_bash=0 can't
-            // shell out. This is the common case — embed tenants run
-            // an HTTP chatbot, not a coding agent.
-            r = { error: "bash is disabled for this tenant" };
-            onEvent({ type: "stderr", text: `[embed] blocked Bash (allow_bash=0)\n` });
+          } else if (tc.name === "Bash") {
+            // Product is chat-web, not a coding agent. Bash is never on the
+            // platform tool list; reject if the model invents the name or an
+            // old client still requests it. Embed tenants may only run Bash
+            // when capability.allow_bash is explicitly true (admin opt-in).
+            const embedBashOk = !!(opts.embedDispatch && opts.capability && opts.capability.allow_bash);
+            if (!embedBashOk) {
+              r = { error: "bash is disabled (chat product, not a coding agent)" };
+              onEvent({ type: "stderr", text: `[tools] blocked Bash\n` });
+            } else {
+              r = await runTool(tc.name, args, {
+                cwd,
+                deadlineMs: args.deadline_ms || DEFAULT_TOOL_DEADLINE_MS,
+                // Even with allow_bash, embed must not phone home.
+                noNetworkEgress: true,
+              });
+            }
           } else {
             r = await runTool(tc.name, args, {
               cwd,
               deadlineMs: args.deadline_ms || DEFAULT_TOOL_DEADLINE_MS,
-              // Embed tenants with allow_bash=true still get network
-              // egress blocked — the embed threat model is "model may
-              // run shell but cannot phone home to credential vaults
-              // or other tenants' saas-app endpoints." A future
-              // tenant config flag can opt-in to a curated allowlist.
               noNetworkEgress: !!opts.embedDispatch,
             });
           }

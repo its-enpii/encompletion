@@ -144,7 +144,7 @@ function loadEmbedSession(sessionId, embed) {
 
 router.post('/sessions', requireEmbedToken, embedRateLimit, (req, res) => {
   const modelKey = resolveModelKey(req.embed);
-  // Per-tenant workdir so Kategori A tools (Read/Write/Edit/Bash) are
+  // Per-tenant workdir so workspace tools (Read/Write/Edit; Bash only if allow_bash) are
   // sandboxed to a directory unique to (tenant, external_user_id).
   // Lazily created — the model never sees the directory path unless it
   // asks via Bash/Read.
@@ -241,7 +241,7 @@ router.post('/sessions/:id/runs', requireEmbedToken, embedRateLimit, async (req,
     userPrompt: safePrompt,
   });
 
-  const runId = registry.create({ sessionId: dbSession.id, userId: null });
+  const { runId, streamTicket } = registry.create({ sessionId: dbSession.id, userId: null });
 
   // Resolve the dynamic tool set for this tenant. Capability profile
   // (allow_artifact_generation, allow_bash) is loaded but only the
@@ -366,7 +366,7 @@ router.post('/sessions/:id/runs', requireEmbedToken, embedRateLimit, async (req,
     registry.end(runId);
   });
 
-  res.status(202).json({ runId, sessionId: dbSession.id, model: dbSession.model });
+  res.status(202).json({ runId, sessionId: dbSession.id, model: dbSession.model, streamTicket });
 });
 
 router.get('/sessions/:id/runs/:runId/stream', requireEmbedToken, embedRateLimit, (req, res) => {
@@ -380,7 +380,8 @@ router.get('/sessions/:id/runs/:runId/stream', requireEmbedToken, embedRateLimit
   }
   const dbSession = loadEmbedSession(sessionId, req.embed);
   if (!dbSession) return res.status(404).json({ error: 'session not found' });
-  if (!registry.subscribe(runId, req, res)) {
+  const ticket = req.query.ticket != null ? String(req.query.ticket) : '';
+  if (!registry.subscribe(runId, req, res, { ticket })) {
     if (!res.headersSent) res.status(404).json({ error: 'run not found' });
   }
 });

@@ -10,11 +10,11 @@ services:
     volumes:
       - backend-data:/app/data
       - backend-storage:/app/storage
-      # Persistent skills directory. The enllm runner loads SKILL.md from
-      # $HOME/.enllm/skills/<name>/SKILL.md (engine-neutral — does not
-      # require any vendor CLI to be installed). The named volume keeps
-      # skill edits across container recreations.
-      - enllm-skills:/root/.enllm/skills
+      # Persistent skills directory. Non-root app user (uid 10001) reads
+      # ENLLM_SKILLS_DIR=/app/skills. Named volume keeps edits across recreations.
+      - enllm-skills:/app/skills
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - claude-net
     healthcheck:

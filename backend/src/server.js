@@ -35,7 +35,12 @@ if (userCount === 0) {
   const u = process.env.BOOTSTRAP_USERNAME || 'admin';
   const p = process.env.BOOTSTRAP_PASSWORD || (NODE_ENV === 'production' ? null : 'admin12345');
   if (!p) throw new Error('BOOTSTRAP_PASSWORD must be set in production');
-  const hash = bcrypt.hashSync(p, 10);
+  // Refuse well-known defaults in production so a forgotten .env can't
+  // ship with admin/admin12345.
+  if (NODE_ENV === 'production' && (p === 'admin12345' || p === 'admin' || p.length < 12)) {
+    throw new Error('BOOTSTRAP_PASSWORD too weak for production (min 12 chars, not a default)');
+  }
+  const hash = bcrypt.hashSync(p, 12);
   db.prepare(
     `INSERT INTO users (username, password, role, display_name)
      VALUES (?, ?, 'admin', 'Administrator')`
@@ -44,7 +49,22 @@ if (userCount === 0) {
 }
 
 const app = express();
-app.use(cors());
+// CORS allowlist. Empty CORS_ORIGINS → no Access-Control-Allow-Origin
+// (same-origin via nginx is fine). Comma-separated list for multi-host.
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+app.use(cors({
+  origin(origin, cb) {
+    // Non-browser (curl, server-to-server) — no Origin header.
+    if (!origin) return cb(null, true);
+    if (CORS_ORIGINS.length === 0) return cb(null, false);
+    if (CORS_ORIGINS.includes(origin)) return cb(null, true);
+    return cb(null, false);
+  },
+  credentials: false,
+}));
 app.use(express.json({ limit: '30mb' }));
 
 // Embed widget static — minimal client for tenant apps. Hosted at
@@ -89,7 +109,8 @@ app.use('/api/embed', embedRouter);
 app.use('/api/admin/embed', embedAdminRouter);
 
 // Run lifecycle: start a run, stream events over SSE, stop a run.
-app.use('/api', requireAuth, runsRouter);
+// Auth is per-route inside runsRouter so SSE can use ?ticket= without JWT.
+app.use('/api', runsRouter);
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`[server] listening on http://0.0.0.0:${PORT}`);

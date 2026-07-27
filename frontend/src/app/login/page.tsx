@@ -96,8 +96,8 @@ export default function LoginPage() {
             />
             <Feature
               icon="terminal"
-              title="Tool transparency"
-              subtitle="Setiap Bash, Read, dan Edit terlihat jelas di panel"
+              title="Artifacts"
+              subtitle="HTML, React, SVG, dokumen — preview di panel samping"
             />
           </div>
         </div>

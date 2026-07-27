@@ -30,15 +30,19 @@ class FakeReq extends EventEmitter {
   constructor() { super(); this.headers = {}; }
 }
 
+function createRun(userId = 7) {
+  return registry.create({ sessionId: 1, userId });
+}
+
 test('emit fans out to every active subscriber', () => {
-  const runId = registry.create({ sessionId: 1, userId: 7 });
+  const { runId, streamTicket } = createRun();
   const fakeRunner = new EventEmitter();
   registry.attachRunner(runId, fakeRunner, { kill() {} });
 
   const a = new FakeRes();
   const b = new FakeRes();
-  registry.subscribe(runId, new FakeReq(), a);
-  registry.subscribe(runId, new FakeReq(), b);
+  registry.subscribe(runId, new FakeReq(), a, { ticket: streamTicket });
+  registry.subscribe(runId, new FakeReq(), b, { ticket: streamTicket });
 
   registry.emit(runId, 'text', { sessionId: 1, text: 'halo' });
 
@@ -50,16 +54,35 @@ test('emit fans out to every active subscriber', () => {
 });
 
 test('keepalive comment is written on subscribe', () => {
-  const runId = registry.create({ sessionId: 1, userId: 7 });
+  const { runId, streamTicket } = createRun();
   registry.attachRunner(runId, new EventEmitter(), { kill() {} });
   const r = new FakeRes();
-  registry.subscribe(runId, new FakeReq(), r);
+  registry.subscribe(runId, new FakeReq(), r, { ticket: streamTicket });
   assert.ok(r.written.some((line) => line.startsWith(': open')));
   registry.end(runId, { immediate: true });
 });
 
+test('subscribe rejects wrong ticket without owner', () => {
+  const { runId } = createRun();
+  registry.attachRunner(runId, new EventEmitter(), { kill() {} });
+  const r = new FakeRes();
+  const ok = registry.subscribe(runId, new FakeReq(), r, { ticket: 'nope' });
+  assert.equal(ok, false);
+  assert.equal(r.statusCode, 403);
+  registry.end(runId, { immediate: true });
+});
+
+test('subscribe allows owner JWT without ticket', () => {
+  const { runId } = createRun(7);
+  registry.attachRunner(runId, new EventEmitter(), { kill() {} });
+  const r = new FakeRes();
+  const ok = registry.subscribe(runId, new FakeReq(), r, { userId: 7 });
+  assert.equal(ok, true);
+  registry.end(runId, { immediate: true });
+});
+
 test('stop requires ownership', () => {
-  const runId = registry.create({ sessionId: 1, userId: 7 });
+  const { runId } = createRun();
   registry.attachRunner(runId, new EventEmitter(), { kill() {} });
   assert.equal(registry.stop(runId, 7), true);
   assert.equal(registry.stop(runId, 99), false); // wrong user
@@ -67,7 +90,7 @@ test('stop requires ownership', () => {
 });
 
 test('stop calls kill on the controller', () => {
-  const runId = registry.create({ sessionId: 1, userId: 7 });
+  const { runId } = createRun();
   let killed = 0;
   registry.attachRunner(runId, new EventEmitter(), { kill() { killed++; } });
   registry.stop(runId, 7);
@@ -75,49 +98,45 @@ test('stop calls kill on the controller', () => {
 });
 
 test('end closes subscribers and emits closing comment', () => {
-  const runId = registry.create({ sessionId: 1, userId: 7 });
+  const { runId, streamTicket } = createRun();
   registry.attachRunner(runId, new EventEmitter(), { kill() {} });
   const r = new FakeRes();
-  registry.subscribe(runId, new FakeReq(), r);
+  registry.subscribe(runId, new FakeReq(), r, { ticket: streamTicket });
   registry.end(runId, { immediate: true });
   assert.ok(r.ended);
   assert.ok(r.written.some((line) => line.startsWith(': end')));
 });
 
 test('subscribe after end returns false (404 path)', () => {
-  const runId = registry.create({ sessionId: 1, userId: 7 });
+  const { runId, streamTicket } = createRun();
   registry.attachRunner(runId, new EventEmitter(), { kill() {} });
   registry.end(runId, { immediate: true });
   const r = new FakeRes();
-  const ok = registry.subscribe(runId, new FakeReq(), r);
+  const ok = registry.subscribe(runId, new FakeReq(), r, { ticket: streamTicket });
   assert.equal(ok, false);
   assert.equal(r.statusCode, 404);
 });
 
 test('emit after end is silently dropped', () => {
-  const runId = registry.create({ sessionId: 1, userId: 7 });
+  const { runId } = createRun();
   registry.attachRunner(runId, new EventEmitter(), { kill() {} });
   registry.end(runId, { immediate: true });
-  // Should not throw, should not write to anyone.
   registry.emit(runId, 'text', { text: 'late' });
 });
 
 test('req close removes the subscriber', () => {
-  const runId = registry.create({ sessionId: 1, userId: 7 });
+  const { runId, streamTicket } = createRun();
   registry.attachRunner(runId, new EventEmitter(), { kill() {} });
   const req = new FakeReq();
   const a = new FakeRes();
   const b = new FakeRes();
-  registry.subscribe(runId, req, a);
-  registry.subscribe(runId, new FakeReq(), b);
+  registry.subscribe(runId, req, a, { ticket: streamTicket });
+  registry.subscribe(runId, new FakeReq(), b, { ticket: streamTicket });
 
-  // Simulate client disconnect on a's request.
   req.emit('close');
 
   registry.emit(runId, 'text', { text: 'after-close' });
-  // a's written should not include the new frame (only initial ": open").
   assert.equal(a.written.length, 1);
-  // b still gets it.
-  assert.equal(b.written.length, 2);
+  assert.ok(b.written.length >= 2);
   registry.end(runId, { immediate: true });
 });

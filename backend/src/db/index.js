@@ -16,10 +16,11 @@ db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
 // Lightweight in-place migration for older DBs. Idempotent — each
-// ALTER only fires once; subsequent boots become no-ops. Keep these
-// at the top so every CREATE TABLE below sees the latest schema.
+// ALTER only fires once; subsequent boots become no-ops. Skip when
+// the table does not exist yet (fresh volume); CREATE TABLE below
+// already includes workdir.
 const _cols = db.prepare("PRAGMA table_info(sessions)").all().map((r) => r.name);
-if (!_cols.includes('workdir')) {
+if (_cols.length && !_cols.includes('workdir')) {
   db.exec('ALTER TABLE sessions ADD COLUMN workdir TEXT');
 }
 

@@ -4,14 +4,13 @@
 # a self-contained embedding pipeline (no API key for vectorization).
 FROM node:22-bookworm-slim
 
-# Install Claude Code CLI globally + poppler-utils for PDF OCR
-# (pdftoppm renders pages to PNG before tesseract reads them).
-# g++ + python3 + make are present so npm rebuilds (e.g. better-sqlite3)
-# work on the bookworm glibc ABI.
+# Claude Code CLI (legacy engine) + poppler for PDF OCR + gosu for
+# root→app drop in the entrypoint. g++/python3/make for native modules.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      git curl bash python3 make g++ poppler-utils ca-certificates \
+      git curl bash python3 make g++ poppler-utils ca-certificates gosu \
     && rm -rf /var/lib/apt/lists/* \
-    && npm install -g @anthropic-ai/claude-code@latest
+    && npm install -g @anthropic-ai/claude-code@latest \
+    && groupadd -r app && useradd -r -g app -u 10001 -d /app -s /usr/sbin/nologin app
 
 WORKDIR /app
 
@@ -20,17 +19,20 @@ RUN npm install --omit=dev
 
 COPY . .
 
-# better-sqlite3 native bindings must be built against the container's
-# node ABI. Rebuild to be safe (already installed once; this is fast and
-# avoids host/container mismatch).
-RUN npm rebuild better-sqlite3
-
-RUN mkdir -p /app/storage/attachments /app/storage/models /app/data
+RUN npm rebuild better-sqlite3 \
+ && mkdir -p /app/storage/attachments /app/storage/models /app/storage/workdirs /app/data /app/skills \
+ && chown -R app:app /app \
+ && chmod +x /app/docker-entrypoint.sh
 
 ENV NODE_ENV=production \
     PORT=4000 \
-    TRANSFORMERS_CACHE=/app/storage/models
+    TRANSFORMERS_CACHE=/app/storage/models \
+    ENLLM_SKILLS_DIR=/app/skills \
+    HOME=/app
 
 EXPOSE 4000
 
+# Entrypoint starts as root only long enough to chown volumes, then
+# re-execs as uid 10001. CMD runs the node server under that user.
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["node", "src/server.js"]

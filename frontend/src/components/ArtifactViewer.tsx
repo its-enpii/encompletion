@@ -224,11 +224,15 @@ function RenderedArtifact({ artifact }: { artifact: Artifact }) {
     );
   }
   if (artifact.type === "svg") {
+    // Sandboxed iframe — never inject LLM SVG into app origin DOM (XSS).
+    const srcDoc = `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;display:flex;align-items:center;justify-content:center;min-height:100%;background:transparent}svg{max-width:100%;max-height:60vh;height:auto}</style></head><body>${artifact.content}</body></html>`;
     return (
       <div className="flex h-full min-h-[200px] w-full items-center justify-center bg-[var(--paper-2)] p-6">
-        <div
-          className="max-h-full max-w-full overflow-auto [&_svg]:h-auto [&_svg]:max-h-[60vh] [&_svg]:max-w-full"
-          dangerouslySetInnerHTML={{ __html: artifact.content }}
+        <iframe
+          sandbox=""
+          srcDoc={srcDoc}
+          title={artifact.title || "SVG preview"}
+          className="h-full min-h-[200px] w-full max-w-full border-0"
         />
       </div>
     );

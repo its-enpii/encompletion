@@ -16,7 +16,7 @@ import express from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
 import db from '../db/index.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireAuthOrStreamTicket } from '../middleware/auth.js';
 import { runLLM } from '../llm-runner.js';
 import { detectArtifacts, evaluateArtifact } from '../artifact-detector.js';
 import { renderProjectMemoryFactsBlock } from '../project_memory.js';
@@ -24,7 +24,8 @@ import rag from '../rag.js';
 import registry from '../run-registry.js';
 
 const router = express.Router();
-router.use(requireAuth);
+// Auth is per-route (not router.use) so the SSE stream can accept a
+// short-lived ?ticket= without forcing the long-lived JWT into the URL.
 
 const MAX_KNOWLEDGE_BYTES = 512 * 1024;
 
@@ -297,7 +298,7 @@ function deriveTitle(replyText) {
  * the registry fan-out. Returns 202 + { runId, sessionId } immediately;
  * the actual streaming happens over the SSE endpoint.
  */
-router.post('/sessions/:id/runs', async (req, res) => {
+router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
   const sessionId = Number(req.params.id);
   const {
     prompt, model, projectId, systemPrompt, attachments = [],
@@ -510,7 +511,7 @@ router.post('/sessions/:id/runs', async (req, res) => {
     ? (await import('../claude-runner.js')).runClaude
     : (await import('../llm-runner.js')).runLLM;
 
-  const runId = registry.create({ sessionId: dbSession.id, userId: req.user.id });
+  const { runId, streamTicket } = registry.create({ sessionId: dbSession.id, userId: req.user.id });
 
   // Per-run accumulators — closure-scoped, not per-connection. The
   // runner onEvent fires once per event; registry fans it out to N SSE
@@ -553,12 +554,9 @@ router.post('/sessions/:id/runs', async (req, res) => {
       projectInstructionsBlock,
       disabledSkills,
       images: imageParts,
-      // Disable the tool registry when the user sends only attachments
-      // with no text. With tools available the LLM often picks Bash/Read
-      // first (workdir is empty, so it asks "Empty directory. What
-      // building?") instead of just looking at the image it was handed.
-      // Vision still works through the multimodal `image_url` parts;
-      // we're just removing the alternative answer path.
+      // Disable tools when the user sends only attachments with no text.
+      // Otherwise the model may poke the empty workspace instead of
+      // describing the image. Vision still works via image_url parts.
       toolsEnabled: !!(safePrompt || !imageParts || imageParts.length === 0),
       history: historyMessages,
       cwd: runCwd,
@@ -971,22 +969,26 @@ router.post('/sessions/:id/runs', async (req, res) => {
     registry.end(runId);
   });
 
-  res.status(202).json({ runId, sessionId: dbSession.id });
+  res.status(202).json({ runId, sessionId: dbSession.id, streamTicket });
 });
 
 /**
  * SSE stream of events for an in-flight or recently-ended run.
- * The EventSource client must pass the JWT via ?token= (EventSource can't
- * send custom headers). requireAuth runs first; if the runId is unknown
- * we send 404 with a JSON body so the client can branch cleanly.
+ * Prefer ?ticket= (opaque stream ticket from create). JWT via Bearer /
+ * ?token= still works for ownership fallback. requireAuth runs first.
  */
-router.get('/sessions/:id/runs/:runId/stream', (req, res) => {
+router.get('/sessions/:id/runs/:runId/stream', requireAuthOrStreamTicket, (req, res) => {
   const runId = Number(req.params.runId);
   if (!Number.isInteger(runId) || runId <= 0) {
     return res.status(400).json({ error: 'invalid run id' });
   }
-  const ok = registry.subscribe(runId, req, res);
-  if (!ok) return; // subscribe already wrote the 404 response
+  const ticket = req.streamTicket || (req.query.ticket != null ? String(req.query.ticket) : '');
+  const ok = registry.subscribe(runId, req, res, {
+    ticket,
+    userId: req.user?.id,
+    isAdmin: req.user?.role === 'admin',
+  });
+  if (!ok) return; // subscribe already wrote the 404/403 response
 });
 
 /**
@@ -994,7 +996,7 @@ router.get('/sessions/:id/runs/:runId/stream', (req, res) => {
  * own runs; admins can stop any. Returns 200 even if the run already
  * ended (idempotent).
  */
-router.post('/sessions/:id/runs/:runId/stop', (req, res) => {
+router.post('/sessions/:id/runs/:runId/stop', requireAuth, (req, res) => {
   const runId = Number(req.params.runId);
   if (!Number.isInteger(runId) || runId <= 0) {
     return res.status(400).json({ error: 'invalid run id' });

@@ -219,7 +219,7 @@ router.post('/sessions/:id/runs', async (req, res) => {
     }
   }
 
-  const runId = registry.create({ sessionId: dbSession.id, userId: req.user.id });
+  const { runId, streamTicket } = registry.create({ sessionId: dbSession.id, userId: req.user.id });
   let cliSessionId = dbSession.claude_session_id || null;
   let usage = null;
   let costUsd = 0;
@@ -350,7 +350,7 @@ router.post('/sessions/:id/runs', async (req, res) => {
     registry.end(runId);
   });
 
-  res.status(202).json({ runId, sessionId: dbSession.id, model });
+  res.status(202).json({ runId, sessionId: dbSession.id, model, streamTicket });
 });
 
 router.get('/sessions/:id/runs/:runId/stream', (req, res) => {
@@ -363,7 +363,12 @@ router.get('/sessions/:id/runs/:runId/stream', (req, res) => {
   // session does.
   const dbSession = ownSessionOr404(req.params.id, req.user);
   if (!dbSession) return res.status(404).json({ error: 'session not found' });
-  if (!registry.subscribe(runId, req, res)) {
+  const ticket = req.query.ticket != null ? String(req.query.ticket) : '';
+  if (!registry.subscribe(runId, req, res, {
+    ticket,
+    userId: req.user?.id,
+    isAdmin: req.user?.role === 'admin',
+  })) {
     if (!res.headersSent) res.status(404).json({ error: 'run not found' });
   }
 });

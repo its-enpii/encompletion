@@ -58,6 +58,21 @@ export function requireAuth(req, res, next) {
   next();
 }
 
+/**
+ * Like requireAuth, but if `?ticket=` is present, skip JWT entirely.
+ * Used by SSE EventSource so the long-lived JWT never lands in the URL
+ * (the opaque stream ticket is enough for registry.subscribe).
+ * When no ticket, falls through to requireAuth (Bearer / ?token=).
+ */
+export function requireAuthOrStreamTicket(req, res, next) {
+  const ticket = req.query.ticket != null ? String(req.query.ticket).trim() : '';
+  if (ticket) {
+    req.streamTicket = ticket;
+    return next();
+  }
+  return requireAuth(req, res, next);
+}
+
 /** Express middleware: require role === 'admin'. Must run after requireAuth. */
 export function requireAdmin(req, res, next) {
   if (req.user?.role !== 'admin') {

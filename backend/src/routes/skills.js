@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { detectArchiveKind, extractZip, listSkillFiles } from '../skills-archive.js';
+import { requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -108,7 +109,7 @@ router.get('/:name', (req, res) => {
 // The endpoint exists so a one-shot drop of a downloaded skill
 // bundle is enough to create a new skill — the editor flow is for
 // refining an existing one, not the only path in.
-router.post('/from-upload', async (req, res) => {
+router.post('/from-upload', requireAdmin, async (req, res) => {
   const { dataBase64, fileName } = req.body || {};
   if (typeof dataBase64 !== 'string')
     return res.status(400).json({ error: 'dataBase64 required' });
@@ -182,7 +183,7 @@ router.post('/from-upload', async (req, res) => {
 // We always overwrite SKILL.md (the canonical entrypoint). Supporting files
 // are written only if explicitly listed — `content` field is base64 for binary
 // safety, but for plain markdown/text we accept UTF-8 strings too.
-router.post('/', (req, res) => {
+router.post('/', requireAdmin, (req, res) => {
   const { name, content, files = [] } = req.body || {};
   const safe = safeName(name);
   if (!safe) return res.status(400).json({ error: 'invalid name (use letters, digits, . _ -)' });
@@ -212,7 +213,7 @@ router.post('/', (req, res) => {
 
 // Update SKILL.md (and optionally supporting files). Use this for "save"
 // in the editor. Body: { content, files? }.
-router.put('/:name', (req, res) => {
+router.put('/:name', requireAdmin, (req, res) => {
   const name = safeName(req.params.name);
   if (!name) return res.status(400).json({ error: 'invalid name' });
   const { content, files } = req.body || {};
@@ -249,7 +250,7 @@ router.put('/:name', (req, res) => {
 });
 
 // Delete a skill (its whole folder).
-router.delete('/:name', (req, res) => {
+router.delete('/:name', requireAdmin, (req, res) => {
   const name = safeName(req.params.name);
   if (!name) return res.status(400).json({ error: 'invalid name' });
   try {
@@ -269,7 +270,7 @@ router.delete('/:name', (req, res) => {
 // writing the archive as a single file. Otherwise we write the bytes verbatim
 // at the relative path the user provided (basename only — folder escape is
 // rejected).
-router.post('/:name/files', async (req, res) => {
+router.post('/:name/files', requireAdmin, async (req, res) => {
   const name = safeName(req.params.name);
   if (!name) return res.status(400).json({ error: 'invalid name' });
   const { dataBase64, name: fileName } = req.body || {};
@@ -337,7 +338,7 @@ router.post('/:name/files', async (req, res) => {
 });
 
 // Delete a supporting file (not SKILL.md).
-router.delete('/:name/files/*', (req, res) => {
+router.delete('/:name/files/*', requireAdmin, (req, res) => {
   const name = safeName(req.params.name);
   if (!name) return res.status(400).json({ error: 'invalid name' });
   // Express 5 syntax: req.params[0] is the wildcard. Strip leading slash.

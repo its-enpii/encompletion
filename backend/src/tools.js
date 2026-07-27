@@ -16,6 +16,7 @@ import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import * as fsSync from "node:fs";
 import * as path from "node:path";
+import { assertSafeHttpUrl, assertSafeResolvedHost } from "./net-guard.js";
 
 const MAX_OUTPUT_BYTES = 64 * 1024;
 const DEFAULT_DEADLINE_MS = 30_000;
@@ -39,6 +40,7 @@ const handlers = {
   Glob: (args, ctx) => runGlob(args, ctx),
   Grep: (args, ctx) => runGrep(args, ctx),
   WebFetch: (args, ctx) => runWebFetch(args, ctx),
+  WebSearch: (args, ctx) => runWebSearch(args, ctx),
 };
 
 export async function runTool(name, args, { cwd, deadlineMs = DEFAULT_DEADLINE_MS, noNetworkEgress = false } = {}) {
@@ -92,13 +94,28 @@ function scanForNetworkCommand(command) {
 }
 
 function resolveSafe(target, cwd) {
-  const abs = path.isAbsolute(target) ? target : path.resolve(cwd, target);
-  const base = path.resolve(cwd) + path.sep;
   const root = path.resolve(cwd);
+  const base = root + path.sep;
+  const abs = path.isAbsolute(target) ? path.resolve(target) : path.resolve(cwd, target);
+  // Lexical check first (cheap).
   if (abs !== root && !abs.startsWith(base)) {
     throw new Error(`path escapes working directory: ${target}`);
   }
-  return abs;
+  // Symlink-aware: realpath of existing path, or realpath(dirname)+basename
+  // for files not yet created (Write). Re-check containment after resolve.
+  let real;
+  try {
+    real = fsSync.realpathSync(abs);
+  } catch {
+    let parentReal;
+    try { parentReal = fsSync.realpathSync(path.dirname(abs)); }
+    catch { parentReal = path.dirname(abs); }
+    real = path.join(parentReal, path.basename(abs));
+  }
+  if (real !== root && !real.startsWith(base)) {
+    throw new Error(`path escapes working directory: ${target}`);
+  }
+  return real;
 }
 
 function withDeadline(promise, ms, killFn) {
@@ -284,53 +301,247 @@ function truncateOk(obj, max) {
   return obj;
 }
 
-async function runWebFetch({ url, max_bytes }, { deadlineMs }) {
+/**
+ * Web research for the chat product. Prefer Brave Search when
+ * BRAVE_SEARCH_API_KEY is set; otherwise DuckDuckGo Instant Answer +
+ * lite HTML organic results (no key). Never shells out.
+ */
+async function runWebSearch({ query, max_results }, { deadlineMs, noNetworkEgress }) {
+  if (noNetworkEgress) return { error: "network egress blocked" };
+  if (!query || typeof query !== "string") return { error: "query is required" };
+  const q = query.trim().slice(0, 400);
+  if (!q) return { error: "query is required" };
+  const limit = Math.min(Math.max(Number(max_results) || 5, 1), 10);
+  const deadline = Math.min(deadlineMs || DEFAULT_DEADLINE_MS, 20_000);
+  const braveKey = (process.env.BRAVE_SEARCH_API_KEY || "").trim();
+
+  try {
+    if (braveKey) {
+      const r = await searchBrave(q, limit, braveKey, deadline);
+      if (!r.error) return r;
+      // Fall through to DDG if Brave errors (quota/network).
+    }
+    return await searchDuckDuckGo(q, limit, deadline);
+  } catch (e) {
+    return { error: e?.message || String(e) };
+  }
+}
+
+async function searchBrave(query, limit, apiKey, deadlineMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), deadlineMs);
+  try {
+    const url =
+      "https://api.search.brave.com/res/v1/web/search?" +
+      new URLSearchParams({ q: query, count: String(limit) }).toString();
+    const r = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+        "X-Subscription-Token": apiKey,
+        "User-Agent": "encompletion/1.0 (WebSearch)",
+      },
+    });
+    if (!r.ok) return { error: `Brave Search HTTP ${r.status}` };
+    const data = await r.json();
+    const rows = Array.isArray(data?.web?.results) ? data.web.results : [];
+    const lines = [`Web search (Brave): ${query}`, ""];
+    let n = 0;
+    for (const item of rows) {
+      if (n >= limit) break;
+      const title = String(item.title || "").trim();
+      const link = String(item.url || "").trim();
+      const snip = String(item.description || "").trim().replace(/\s+/g, " ");
+      if (!link) continue;
+      n++;
+      lines.push(`${n}. ${title || link}`);
+      lines.push(`   ${link}`);
+      if (snip) lines.push(`   ${snip.slice(0, 280)}`);
+      lines.push("");
+    }
+    if (n === 0) return { error: "no results" };
+    lines.push("Cite URLs in your reply. Use WebFetch to read a specific page.");
+    return truncateOk({ text: lines.join("\n").trim() }, MAX_OUTPUT_BYTES);
+  } catch (e) {
+    if (e?.name === "AbortError") return { error: `request aborted after ${deadlineMs}ms` };
+    return { error: e?.message || String(e) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function searchDuckDuckGo(query, limit, deadlineMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), deadlineMs);
+  try {
+    const lines = [`Web search (DuckDuckGo): ${query}`, ""];
+    let n = 0;
+
+    // Instant Answer JSON — abstracts + related topics (no key).
+    const iaUrl =
+      "https://api.duckduckgo.com/?" +
+      new URLSearchParams({
+        q: query,
+        format: "json",
+        no_html: "1",
+        skip_disambig: "1",
+      }).toString();
+    const iaRes = await fetch(iaUrl, {
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "encompletion/1.0 (WebSearch)",
+      },
+    });
+    if (iaRes.ok) {
+      const ia = await iaRes.json();
+      const abs = String(ia.AbstractText || "").trim();
+      const absUrl = String(ia.AbstractURL || "").trim();
+      const heading = String(ia.Heading || "").trim();
+      if (abs) {
+        lines.push(`Summary${heading ? ` — ${heading}` : ""}:`);
+        lines.push(abs.slice(0, 600));
+        if (absUrl) lines.push(absUrl);
+        lines.push("");
+      }
+      const related = [];
+      const walk = (arr) => {
+        for (const t of arr || []) {
+          if (t?.Topics) walk(t.Topics);
+          else if (t?.FirstURL && t?.Text) related.push(t);
+        }
+      };
+      walk(ia.RelatedTopics);
+      for (const t of related) {
+        if (n >= limit) break;
+        n++;
+        lines.push(`${n}. ${String(t.Text).slice(0, 160)}`);
+        lines.push(`   ${t.FirstURL}`);
+        lines.push("");
+      }
+      for (const t of ia.Results || []) {
+        if (n >= limit) break;
+        if (!t?.FirstURL) continue;
+        n++;
+        lines.push(`${n}. ${String(t.Text || t.FirstURL).slice(0, 160)}`);
+        lines.push(`   ${t.FirstURL}`);
+        lines.push("");
+      }
+    }
+
+    // Organic results via lite HTML when Instant Answer is thin.
+    if (n < limit) {
+      const liteUrl =
+        "https://lite.duckduckgo.com/lite/?" +
+        new URLSearchParams({ q: query }).toString();
+      const liteRes = await fetch(liteUrl, {
+        signal: controller.signal,
+        headers: {
+          Accept: "text/html",
+          "User-Agent": "encompletion/1.0 (WebSearch)",
+        },
+      });
+      if (liteRes.ok) {
+        const html = await liteRes.text();
+        for (const hit of parseDdgLiteResults(html)) {
+          if (n >= limit) break;
+          // DDG sometimes wraps redirects; keep http(s) only.
+          if (!/^https?:\/\//i.test(hit.url)) continue;
+          n++;
+          lines.push(`${n}. ${hit.title || hit.url}`);
+          lines.push(`   ${hit.url}`);
+          if (hit.snippet) lines.push(`   ${hit.snippet.slice(0, 280)}`);
+          lines.push("");
+        }
+      }
+    }
+
+    if (n === 0 && lines.length <= 2) return { error: "no results" };
+    lines.push("Cite URLs in your reply. Use WebFetch to read a specific page.");
+    return truncateOk({ text: lines.join("\n").trim() }, MAX_OUTPUT_BYTES);
+  } catch (e) {
+    if (e?.name === "AbortError") return { error: `request aborted after ${deadlineMs}ms` };
+    return { error: e?.message || String(e) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Best-effort parse of DuckDuckGo lite HTML result links. */
+function parseDdgLiteResults(html) {
+  const out = [];
+  const seen = new Set();
+  // lite.duckduckgo.com: result links are <a rel="nofollow" href="https://...">title</a>
+  // often inside result tables. Snippet is nearby plain text — optional.
+  const re = /<a[^>]+rel="nofollow"[^>]+href="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  let m;
+  while ((m = re.exec(html)) !== null && out.length < 15) {
+    let url = m[1];
+    // Unwrap DDG redirect if present.
+    try {
+      const u = new URL(url);
+      if (u.hostname.endsWith("duckduckgo.com") && u.searchParams.get("uddg")) {
+        url = u.searchParams.get("uddg");
+      }
+    } catch { continue; }
+    if (!url || seen.has(url)) continue;
+    if (/duckduckgo\.com/i.test(url)) continue;
+    seen.add(url);
+    const title = htmlToText(m[2]).slice(0, 160);
+    out.push({ url, title, snippet: "" });
+  }
+  return out;
+}
+
+async function runWebFetch({ url, max_bytes }, { deadlineMs, noNetworkEgress }) {
+  if (noNetworkEgress) return { error: "network egress blocked" };
   if (!url || typeof url !== "string") return { error: "url is required" };
-  let parsed;
-  try { parsed = new URL(url); } catch { return { error: "invalid url" }; }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    return { error: `unsupported protocol: ${parsed.protocol}` };
-  }
-  // Block SSRF into private / loopback ranges. Same-host + same-network
-  // requests can still leak API keys via DNS rebinding — for an MVP
-  // sandbox this is acceptable; tighten before exposing to untrusted
-  // users.
-  const host = parsed.hostname;
-  if (
-    host === "localhost" ||
-    host === "127.0.0.1" || host.startsWith("127.") ||
-    host === "::1" || host === "0.0.0.0" ||
-    host.endsWith(".local") || host.endsWith(".internal") ||
-    host === "169.254.169.254" // cloud metadata
-  ) {
-    return { error: "private / loopback hosts are blocked" };
-  }
+  const parsed = assertSafeHttpUrl(url);
+  if (!parsed.ok) return { error: parsed.error };
+  const dns = await assertSafeResolvedHost(parsed.url.hostname);
+  if (!dns.ok) return { error: dns.error };
 
   const cap = Math.min(Math.max(max_bytes || 256 * 1024, 4096), 1024 * 1024);
   const controller = new AbortController();
-  let timer;
   const deadline = Math.min(deadlineMs || DEFAULT_DEADLINE_MS, 30_000);
-  timer = setTimeout(() => controller.abort(), deadline);
+  const timer = setTimeout(() => controller.abort(), deadline);
 
+  // Manual redirect follow so each hop re-validates host/DNS (no open
+  // redirect into 10/8 via Location). Cap hops at 5.
   try {
-    const r = await fetch(url, {
-      redirect: "follow",
-      signal: controller.signal,
-      headers: {
-        "User-Agent": "claude-web/1.0 (WebFetch tool)",
-        "Accept": "text/html, application/json, text/plain;q=0.9, */*;q=0.5",
-      },
-    });
+    let current = parsed.url.href;
+    let r = null;
+    for (let hop = 0; hop < 5; hop++) {
+      r = await fetch(current, {
+        redirect: "manual",
+        signal: controller.signal,
+        headers: {
+          "User-Agent": "claude-web/1.0 (WebFetch tool)",
+          "Accept": "text/html, application/json, text/plain;q=0.9, */*;q=0.5",
+        },
+      });
+      if (r.status >= 300 && r.status < 400) {
+        const loc = r.headers.get("location");
+        if (!loc) return { error: `redirect without Location (${r.status})` };
+        let next;
+        try { next = new URL(loc, current); } catch { return { error: "invalid redirect url" }; }
+        const hopCheck = assertSafeHttpUrl(next.href);
+        if (!hopCheck.ok) return { error: hopCheck.error };
+        const hopDns = await assertSafeResolvedHost(hopCheck.url.hostname);
+        if (!hopDns.ok) return { error: hopDns.error };
+        current = hopCheck.url.href;
+        continue;
+      }
+      break;
+    }
+    if (!r) return { error: "fetch failed" };
     if (!r.ok) return { error: `HTTP ${r.status} ${r.statusText}` };
     const ctype = r.headers.get("content-type") || "";
-    // Read up to cap, then bail. Use arrayBuffer + decode to count bytes.
     const buf = new Uint8Array(await r.arrayBuffer());
     const slice = buf.byteLength > cap ? buf.slice(0, cap) : buf;
     const decoder = new TextDecoder("utf-8", { fatal: false });
     let text = decoder.decode(slice);
-    if (ctype.includes("text/html")) {
-      text = htmlToText(text);
-    }
+    if (ctype.includes("text/html")) text = htmlToText(text);
     return truncateOk({ text }, MAX_OUTPUT_BYTES);
   } catch (e) {
     if (e?.name === "AbortError") return { error: `request aborted after ${deadline}ms` };

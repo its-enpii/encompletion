@@ -89,14 +89,58 @@ export function invalidatePersonaCache(tenantId) {
 }
 
 /**
+ * Absolute "today" for the model so relative phrases (yesterday, last
+ * week, kemarin, minggu lalu) become Y-m-d *before* tool calls.
+ * SaaS apps (SIDBM, etc.) must not re-parse NL dates — they only accept
+ * concrete calendar dates.
+ *
+ * TZ: EMBED_TIMEZONE env, else process TZ, else UTC. Format is fixed
+ * ISO date + short weekday so the model has an anchor without a clock lib.
+ */
+export function buildTodayContextBlock(now = new Date(), timeZone) {
+  const tz = timeZone
+    || process.env.EMBED_TIMEZONE
+    || process.env.TZ
+    || 'UTC';
+  let iso;
+  let weekday;
+  try {
+    iso = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(now); // en-CA → YYYY-MM-DD
+    weekday = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      weekday: 'long',
+    }).format(now);
+  } catch {
+    iso = now.toISOString().slice(0, 10);
+    weekday = 'unknown';
+  }
+  return [
+    '<system>',
+    `Today's date is ${iso} (${weekday}, timezone ${tz}).`,
+    'When the user says relative dates (yesterday, day before yesterday, last week, last month, kemarin, kemarin lusa, minggu lalu, bulan lalu, etc.), convert them to absolute YYYY-MM-DD yourself before calling any tool.',
+    'Tool parameters that are dates must always be YYYY-MM-DD — never relative phrases.',
+    '</system>',
+  ].join('\n');
+}
+
+/**
  * Build the full final prompt string for an embed run. Persona block
  * (if any) is pinned at the top in a <system> tag. Caller-supplied
  * system_prompt (if any — sessions.system_prompt override) is appended
  * as a second <system> tag so order is predictable.
+ *
+ * A fresh "today" context block is always injected so relative-date
+ * resolution stays in the LLM, not in tenant tool backends.
  */
-export function buildEmbedPrompt({ personaBlock, systemPromptOverride, userPrompt }) {
+export function buildEmbedPrompt({ personaBlock, systemPromptOverride, userPrompt, now, timeZone }) {
   const blocks = [];
   if (personaBlock) blocks.push(personaBlock);
+  blocks.push(buildTodayContextBlock(now, timeZone));
   if (systemPromptOverride) {
     blocks.push(`<system>\n${String(systemPromptOverride).slice(0, 8000)}\n</system>`);
   }

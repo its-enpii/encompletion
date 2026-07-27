@@ -91,14 +91,14 @@ router.post('/', requireAdmin, (req, res) => {
   if (!username?.trim() || !password) {
     return res.status(400).json({ error: 'username & password required' });
   }
-  if (password.length < 6) {
-    return res.status(400).json({ error: 'password too short (min 6 chars)' });
+  if (password.length < 12) {
+    return res.status(400).json({ error: 'password too short (min 12 chars)' });
   }
   const safeRole = role === 'admin' ? 'admin' : 'member';
   const exists = db.prepare('SELECT id FROM users WHERE username = ?').get(username.trim());
   if (exists) return res.status(409).json({ error: 'username already exists' });
 
-  const hash = bcrypt.hashSync(password, 10);
+  const hash = bcrypt.hashSync(password, 12);
   const info = db
     .prepare(
       `INSERT INTO users (username, password, role, display_name)
@@ -161,12 +161,12 @@ router.post('/:id/reset-password', (req, res) => {
     return res.status(403).json({ error: 'admin required' });
   }
   const { new_password } = req.body || {};
-  if (!new_password || new_password.length < 6) {
-    return res.status(400).json({ error: 'new_password too short (min 6 chars)' });
+  if (!new_password || new_password.length < 12) {
+    return res.status(400).json({ error: 'new_password too short (min 12 chars)' });
   }
   const target = db.prepare('SELECT id FROM users WHERE id = ?').get(req.params.id);
   if (!target) return res.status(404).json({ error: 'user not found' });
-  const hash = bcrypt.hashSync(new_password, 10);
+  const hash = bcrypt.hashSync(new_password, 12);
   db.prepare(
     'UPDATE users SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
   ).run(hash, req.params.id);

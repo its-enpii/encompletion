@@ -175,9 +175,11 @@ export function ArtifactViewerDialog({ artifactId, title, onClose }: Props) {
                     className="h-[60vh] w-full rounded border border-[var(--line)] bg-white"
                   />
                 ) : artifact.type === "svg" ? (
-                  <div
-                    className="flex min-h-[200px] items-center justify-center [&_svg]:h-auto [&_svg]:max-h-[60vh] [&_svg]:max-w-full"
-                    dangerouslySetInnerHTML={{ __html: artifact.content }}
+                  <iframe
+                    sandbox=""
+                    srcDoc={`<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;display:flex;align-items:center;justify-content:center;min-height:100%;background:transparent}svg{max-width:100%;max-height:60vh;height:auto}</style></head><body>${artifact.content}</body></html>`}
+                    title={artifact.title || "SVG preview"}
+                    className="h-[60vh] w-full rounded border border-[var(--line)] bg-white"
                   />
                 ) : artifact.type === "markdown" ? (
                   <div className="max-h-[60vh] overflow-auto whitespace-pre-wrap rounded border border-[var(--line)] bg-[var(--paper)] p-4 text-sm leading-[1.65] text-[var(--ink)]">

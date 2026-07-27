@@ -51,6 +51,8 @@ export type RunEventHandlers = Partial<Record<RunEventName, RunEventHandler>> & 
 export type SubscribeRunOpts = {
   sessionId: number;
   runId: number;
+  /** Opaque per-run stream ticket from startRun — preferred over JWT in query. */
+  streamTicket?: string;
   handlers: RunEventHandlers;
 };
 
@@ -65,7 +67,7 @@ export type StartRunPayload = {
   regenerate?: boolean;
 };
 
-export type StartRunResponse = { runId: number; sessionId: number };
+export type StartRunResponse = { runId: number; sessionId: number; streamTicket?: string };
 
 /**
  * Open an EventSource for an active run. Returns a handle whose
@@ -77,9 +79,15 @@ export type StartRunResponse = { runId: number; sessionId: number };
  * to loadSession() to recover the persisted transcript.
  */
 export function subscribeRun(opts: SubscribeRunOpts): { unsubscribe: () => void; source: EventSource } {
-  const token = getToken();
   const params = new URLSearchParams();
-  if (token) params.set("token", token);
+  // Prefer short-lived stream ticket so the long-lived JWT never lands in
+  // access logs / Referer. Fall back to ?token= only for legacy servers.
+  if (opts.streamTicket) {
+    params.set("ticket", opts.streamTicket);
+  } else {
+    const token = getToken();
+    if (token) params.set("token", token);
+  }
   const url = `/api/sessions/${opts.sessionId}/runs/${opts.runId}/stream?${params.toString()}`;
 
   const source = new EventSource(url);

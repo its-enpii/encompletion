@@ -140,21 +140,34 @@ export default function Chat({
   // Triggers the SSE subscribe effect below; same id survives session-route
   // changes so the stream stays attached mid-navigation.
   const [activeRunId, setActiveRunId] = useState<number | null>(null);
+  // Per-run SSE ticket (opaque). Prefer over JWT in EventSource query.
+  const [activeStreamTicket, setActiveStreamTicket] = useState<string | null>(null);
   // Persistence helper: every active run is stashed in sessionStorage under
   // a per-session key. When the user navigates away and back to the same
   // /chat/:id, the freshly-mounted Chat component reads this and re-attaches
   // to the still-running stream (the backend registry keeps the run alive
   // for 60s after `done`, so late subscribers see the full event sequence
   // including events that fired while we were away).
-  function persistActiveRun(runId: number | null, sid: number | null) {
+  function persistActiveRun(runId: number | null, sid: number | null, ticket?: string | null) {
     if (typeof window === "undefined" || sid == null) return;
     try {
       if (runId != null) {
-        window.sessionStorage.setItem(`app:active-run:${sid}`, String(runId));
+        window.sessionStorage.setItem(
+          `app:active-run:${sid}`,
+          JSON.stringify({ runId, streamTicket: ticket || null }),
+        );
       } else {
         window.sessionStorage.removeItem(`app:active-run:${sid}`);
       }
     } catch { /* sessionStorage may be blocked */ }
+  }
+  function adoptRun(runId: number, ticket?: string | null) {
+    setActiveRunId(runId);
+    setActiveStreamTicket(ticket || null);
+  }
+  function clearRun() {
+    setActiveRunId(null);
+    setActiveStreamTicket(null);
   }
 
   // Restore persisted effort + model. Wrapper reads both new (app:*) and
@@ -323,7 +336,7 @@ export default function Chat({
       const hasAssistantRow = m.some((row: any) => row.role === "assistant");
       if (hasAssistantRow) {
         setStreaming(false);
-        setActiveRunId(null);
+        clearRun();
         setLastTickAt(null);
         setInfo(null);
       }
@@ -386,7 +399,7 @@ export default function Chat({
     // the head of the array once loadSession merges DB rows in,
     // producing the "AI bubble floats above the user chip" symptom.
     try {
-      const { runId } = await startRun({
+      const { runId, streamTicket } = await startRun({
         sessionId: pending.sessionId,
         prompt: pending.prompt,
         model: pending.model,
@@ -395,8 +408,8 @@ export default function Chat({
         attachments: pending.attachments,
       });
       if (!runId) throw new Error("no run id returned");
-      setActiveRunId(runId);
-      persistActiveRun(runId, pending.sessionId);
+      adoptRun(runId, streamTicket);
+      persistActiveRun(runId, pending.sessionId, streamTicket);
     } catch (e: any) {
       sendingRef.current = false;
       pushChatError(e?.message || "Gagal kirim");
@@ -468,10 +481,18 @@ export default function Chat({
       try {
         const runRaw = window.sessionStorage.getItem(`app:active-run:${sessionId}`);
         if (runRaw) {
-          const runId = Number(runRaw);
+          let runId = 0;
+          let ticket: string | null = null;
+          try {
+            const parsed = JSON.parse(runRaw);
+            runId = Number(parsed?.runId ?? parsed);
+            ticket = typeof parsed?.streamTicket === "string" ? parsed.streamTicket : null;
+          } catch {
+            runId = Number(runRaw); // legacy plain number
+          }
           if (Number.isInteger(runId) && runId > 0 && activeRunId == null) {
             queueMicrotask(() => {
-              setActiveRunId(runId);
+              adoptRun(runId, ticket);
               // Show the spinner immediately — loadSession() will refill
               // the messages from the DB and the re-attached SSE stream
               // catches any events that come after.
@@ -695,7 +716,7 @@ export default function Chat({
         // when the assistant produced text, so a vision-only turn (no
         // text deltas) would leave TypingPill stuck.
         sendingRef.current = false;
-        setActiveRunId(null);
+        clearRun();
         setStreaming(false);
         setLastTickAt(null);
         // Clear the "Sedang berpikir…" header — the cost/duration summary
@@ -781,13 +802,18 @@ export default function Chat({
       },
     };
 
-    const { unsubscribe, source } = subscribeRun({ sessionId, runId: activeRunId, handlers });
+    const { unsubscribe, source } = subscribeRun({
+      sessionId,
+      runId: activeRunId,
+      streamTicket: activeStreamTicket || undefined,
+      handlers,
+    });
     sourceRef.current = source;
     return () => {
       unsubscribe();
       sourceRef.current = null;
     };
-  }, [sessionId, activeRunId]);
+  }, [sessionId, activeRunId, activeStreamTicket]);
 
   // SSE safety net — if the EventSource silently drops mid-run (network
   // blip, server-side registry timeout) the `done` event may never
@@ -808,7 +834,7 @@ export default function Chat({
           // (504, gateway timeout, etc) but the row still exists.
           if (msgs.some((row: any) => row.role === "assistant")) {
             setStreaming(false);
-            setActiveRunId(null);
+            clearRun();
             setLastTickAt(null);
             setInfo(null);
           }
@@ -968,7 +994,7 @@ export default function Chat({
 
     // Existing session: kick off the run immediately.
     try {
-      const { runId } = await startRun({
+      const { runId, streamTicket } = await startRun({
         sessionId: targetSessionId,
         prompt: text,
         model,
@@ -979,8 +1005,8 @@ export default function Chat({
         attachments: pendingAtts,
       });
       if (!runId) throw new Error("no run id returned");
-      setActiveRunId(runId);
-      persistActiveRun(runId, targetSessionId);
+      adoptRun(runId, streamTicket);
+      persistActiveRun(runId, targetSessionId, streamTicket);
     } catch (e: any) {
       sendingRef.current = false;
       pushChatError(e?.message || "Gagal kirim");
@@ -993,7 +1019,8 @@ export default function Chat({
     // Optimistic UI flip — the backend's `stopped` event will follow.
     sendingRef.current = false;
     setStreaming(false);
-    setActiveRunId(null);
+    clearRun();
+    persistActiveRun(null, sessionId);
     stopRun(sessionId, activeRunId).catch(() => { /* runner may already be done */ });
   }
 
@@ -1135,7 +1162,7 @@ export default function Chat({
     setStale(false);
 
     try {
-      const { runId } = await startRun({
+      const { runId, streamTicket } = await startRun({
         sessionId,
         prompt: lastUser.content,
         model,
@@ -1144,8 +1171,8 @@ export default function Chat({
         regenerate: true,
       });
       if (!runId) throw new Error("no run id returned");
-      setActiveRunId(runId);
-      persistActiveRun(runId, sessionId);
+      adoptRun(runId, streamTicket);
+      persistActiveRun(runId, sessionId, streamTicket);
     } catch (e: any) {
       pushChatError(e?.message || "Gagal regenerate");
       setStreaming(false);

@@ -22,9 +22,12 @@
 
 import crypto from 'node:crypto';
 import db from './db/index.js';
+import { assertSafeHttpUrl, assertSafeResolvedHost } from './net-guard.js';
 
 const MAX_BODY_BYTES = 1 * 1024 * 1024;   // 1MB cap on response body
 const REQUEST_TIMEOUT_MS = parseInt(process.env.TOOL_TIMEOUT_MS || '8000', 10);
+// Pepper so HMAC is not forgeable from key_hash alone (DB dump).
+const SIGNING_PEPPER = process.env.TOOL_SIGNING_PEPPER || process.env.JWT_SECRET || 'dev-tool-pepper';
 
 // -- Schema validation -----------------------------------------------------
 
@@ -194,6 +197,12 @@ export async function executeHttpTool(tool, params, ctx) {
   if (!tool || !tool.endpoint_url) {
     return { ok: false, error: 'tool missing endpoint_url' };
   }
+  // Defense in depth: re-check endpoint even if admin already validated.
+  const urlCheck = assertSafeHttpUrl(tool.endpoint_url);
+  if (!urlCheck.ok) return { ok: false, error: `endpoint_url blocked: ${urlCheck.error}` };
+  const dnsCheck = await assertSafeResolvedHost(urlCheck.url.hostname);
+  if (!dnsCheck.ok) return { ok: false, error: `endpoint_url blocked: ${dnsCheck.error}` };
+
   let schema = {};
   if (tool.json_schema) {
     try { schema = JSON.parse(tool.json_schema); }
@@ -215,13 +224,12 @@ export async function executeHttpTool(tool, params, ctx) {
   });
   const headers = { 'Content-Type': 'application/json' };
   if (sigKey?.key_hash) {
-    // The saas-app stores the same key_hash and verifies the HMAC by
-    // computing it itself with the active api_key secret it has on
-    // file. We send key_hash + signature; the app looks up the key by
-    // hash and recomputes HMAC over (timestamp + body) to compare.
+    // HMAC key = pepper + key_hash so a DB dump of key_hash alone cannot
+    // forge signatures. SaaS apps must use the same TOOL_SIGNING_PEPPER
+    // (or the raw tenant API key if they store it) — document in ops.
     const ts = String(Date.now());
     const sig = crypto
-      .createHmac('sha256', sigKey.key_hash)
+      .createHmac('sha256', SIGNING_PEPPER + ':' + sigKey.key_hash)
       .update(ts + '.' + body)
       .digest('hex');
     headers['X-Encompletion-Signature'] = sig;
@@ -234,11 +242,12 @@ export async function executeHttpTool(tool, params, ctx) {
 
   let res;
   try {
-    res = await fetch(tool.endpoint_url, {
+    res = await fetch(urlCheck.url.href, {
       method: 'POST',
       headers,
       body,
       signal: ctl.signal,
+      redirect: 'error', // never follow — could land on private IP
     });
   } catch (e) {
     clearTimeout(timer);

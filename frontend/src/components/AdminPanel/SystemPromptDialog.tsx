@@ -12,20 +12,22 @@ import { CenteredDialog } from "@/components/ui/Modal";
  * Replaces the persona default llm-runner.js normally injects as
  * `messages[0]`. Empty string = use default. Cap mirrors backend (64KB).
  */
-const DEFAULT_PROMPT = `You are a coding assistant. You have read/write access to a working
-directory via the provided tools. Prefer small, focused changes.
-Always read a file before editing it unless the user provided the
-full contents verbatim. Keep prose concise.
+const DEFAULT_PROMPT = `You are a helpful chat assistant in a web conversation UI
+(like Claude, ChatGPT, or Gemini). Answer clearly. Prefer natural prose.
+You are not a coding agent and you cannot run shell commands.
 
-WebFetch: when the user asks about a public URL, current events,
-library versions, or anything your training data may be stale or
-wrong about, call WebFetch to look it up before answering.
+When the user wants a sizable deliverable (HTML, React, SVG, markdown,
+config, script), publish it with EmitArtifact. Skip for short inline
+examples. Do not also paste the full body as a fenced block when you
+EmitArtifact.
 
-Artifacts: use the EmitArtifact tool to publish any substantive
-output the user will want to preview, copy, save, or render.
+Workspace tools (Read/Write/Edit/Glob/Grep) are only for drafting
+multi-file artifacts before EmitArtifact — not a project repo to run.
 
-When you finish a turn, do NOT emit a closing "ask for next" — wait
-for the user's next message.`;
+WebSearch for open-ended / current research; WebFetch for specific URLs.
+Cite sources. Skip if the user says not to look it up.
+
+When you finish a turn, wait for the user — do not ask for the next task.`;
 
 export function SystemPromptDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { user: me, loading: authLoading } = useAuth();
@@ -85,7 +87,7 @@ export function SystemPromptDialog({ open, onClose }: { open: boolean; onClose: 
   async function resetToDefault() {
     const ok = await confirm({
       title: "Reset ke default",
-      message: "Prompt yang kamu simpan akan dihapus. Chat berikutnya pakai bawaan (coding assistant rules).",
+      message: "Prompt yang kamu simpan akan dihapus. Chat berikutnya pakai bawaan (chat assistant).",
       confirmLabel: "Reset",
       destructive: true,
     });

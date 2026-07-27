@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+
 /**
  * Run registry — module-scoped fan-out for in-flight LLM runs.
  *
@@ -33,10 +35,13 @@ const KEEPALIVE_MS = 25_000;
 const GRACE_MS = 120_000;
 
 class RunState {
-  constructor({ runId, sessionId, userId }) {
+  constructor({ runId, sessionId, userId, streamTicket }) {
     this.runId = runId;
     this.sessionId = sessionId;
     this.userId = userId;
+    // Short-lived opaque ticket for SSE EventSource (?ticket=). Avoids
+    // putting the long-lived JWT in query strings / access logs.
+    this.streamTicket = streamTicket;
     this.runner = null;             // EventEmitter from llm-runner.js
     this.controller = null;         // { kill } from runner
     this.subscribers = new Set();   // active SSE response streams
@@ -54,11 +59,19 @@ function newRunId() {
   return Date.now() * 1000 + Math.floor(Math.random() * 1000);
 }
 
+function newStreamTicket() {
+  return crypto.randomBytes(24).toString('base64url');
+}
+
 export const registry = {
+  /**
+   * @returns {{ runId: number, streamTicket: string }}
+   */
   create({ sessionId, userId }) {
     const runId = newRunId();
-    runs.set(runId, new RunState({ runId, sessionId, userId }));
-    return runId;
+    const streamTicket = newStreamTicket();
+    runs.set(runId, new RunState({ runId, sessionId, userId, streamTicket }));
+    return { runId, streamTicket };
   },
 
   attachRunner(runId, runner, controller) {
@@ -76,7 +89,15 @@ export const registry = {
    * close. Returns true on success; false (and writes 404) if the run
    * is unknown or already ended.
    */
-  subscribe(runId, req, res) {
+  /**
+   * @param {number} runId
+   * @param {import('express').Request} req
+   * @param {import('express').Response} res
+   * @param {{ ticket?: string, userId?: number, isAdmin?: boolean }} [auth]
+   *   Prefer `ticket` (stream ticket from create). Fall back to JWT user
+   *   ownership when ticket missing (legacy clients / admin).
+   */
+  subscribe(runId, req, res, auth = {}) {
     const s = runs.get(runId);
     if (!s || s.ended) {
       // Only meaningful when res.status exists (Express Response). The
@@ -86,6 +107,21 @@ export const registry = {
         res.status(404).json({ error: 'run not found or ended' });
       } else {
         res.statusCode = 404;
+        if (typeof res.end === 'function') res.end();
+      }
+      return false;
+    }
+    // Auth: matching stream ticket OR (owner/admin via JWT). Ticket alone
+    // is enough so EventSource never needs the JWT in the query string.
+    const ticket = auth.ticket != null ? String(auth.ticket) : '';
+    const ticketOk = ticket && s.streamTicket && ticket === s.streamTicket;
+    const ownerOk = auth.isAdmin || (auth.userId != null && s.userId === auth.userId);
+    // Embed runs set userId=null — ticket is mandatory for those.
+    if (!ticketOk && !ownerOk) {
+      if (typeof res.status === 'function') {
+        res.status(403).json({ error: 'forbidden' });
+      } else {
+        res.statusCode = 403;
         if (typeof res.end === 'function') res.end();
       }
       return false;
@@ -142,7 +178,9 @@ export const registry = {
   stop(runId, userId) {
     const s = runs.get(runId);
     if (!s) return false;
-    if (s.userId !== userId) return false;
+    // Platform runs: owner must match. Embed runs (userId=null): caller
+    // already passed session ownership — allow stop without a user id.
+    if (s.userId != null && s.userId !== userId) return false;
     if (s.ended) return true;
     if (s.controller) {
       try { s.controller.kill(); } catch { /* runner already exited */ }

@@ -19,6 +19,7 @@ import db from '../db/index.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { readKey, _invalidateCachedKey, _resetCacheForTests } from '../middleware/tenant-api-key.js';
 import { invalidatePersonaCache } from '../persona.js';
+import { assertSafeHttpUrl } from '../net-guard.js';
 
 const router = express.Router();
 router.use(requireAuth, requireAdmin);
@@ -168,10 +169,9 @@ router.post('/tenants/:id/tools', (req, res) => {
   if (!name?.trim() || !description || !json_schema || !endpoint_url) {
     return res.status(400).json({ error: 'name, description, json_schema, endpoint_url required' });
   }
-  // Best-effort URL parse — reject anything that doesn't look like an
-  // http(s) URL. endpoint_url is admin-controlled, but we want a guard
-  // rail against file://, javascript:, etc.
-  try { new URL(endpoint_url); } catch { return res.status(400).json({ error: 'invalid endpoint_url' }); }
+  // http(s) only + block private/loopback hosts (SSRF via tool executor).
+  const urlOk = assertSafeHttpUrl(endpoint_url);
+  if (!urlOk.ok) return res.status(400).json({ error: `invalid endpoint_url: ${urlOk.error}` });
   if (!['business_action', 'content_generation'].includes(tool_category || 'business_action')) {
     return res.status(400).json({ error: 'invalid tool_category' });
   }
@@ -221,7 +221,8 @@ router.patch('/tools/:id', (req, res) => {
     params.push(JSON.stringify(parsed));
   }
   if (endpoint_url !== undefined) {
-    try { new URL(endpoint_url); } catch { return res.status(400).json({ error: 'invalid endpoint_url' }); }
+    const urlOk = assertSafeHttpUrl(endpoint_url);
+    if (!urlOk.ok) return res.status(400).json({ error: `invalid endpoint_url: ${urlOk.error}` });
     fields.push('endpoint_url = ?');
     params.push(String(endpoint_url).slice(0, MAX_TOOL_FIELDS.endpoint_url));
   }
