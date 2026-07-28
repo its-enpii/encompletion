@@ -40,7 +40,10 @@ function buildPersonaBlock(persona, tenantName) {
     lines.push(`Avatar: ${String(persona.avatar_url).slice(0, 200)}`);
   }
   if (persona.greeting) {
-    lines.push(`When greeting the user for the first time in a session, say: "${String(persona.greeting).slice(0, 240)}".`);
+    lines.push(
+      `Optional first-turn greeting style (only if the host has not already greeted and there is no prior conversation): "${String(persona.greeting).slice(0, 240)}". ` +
+      `Never re-greet or re-introduce yourself after the conversation has started.`
+    );
   }
   if (persona.instructions) {
     lines.push(String(persona.instructions).slice(0, 4000));

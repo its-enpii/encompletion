@@ -142,6 +142,22 @@ function loadEmbedSession(sessionId, embed) {
     .get(sessionId, embed.tenant_id, embed.external_user_id);
 }
 
+/** Text-only prior turns for embed (no multimodal). Caps window like platform runs. */
+function buildEmbedHistory(sessionId, currentUserMsgId, max = 20) {
+  if (!sessionId || !currentUserMsgId) return [];
+  const rows = db
+    .prepare(
+      `SELECT role, content FROM messages
+         WHERE session_id = ? AND id < ?
+           AND role IN ('user', 'assistant')
+           AND content IS NOT NULL AND TRIM(content) != ''
+         ORDER BY id DESC LIMIT ?`
+    )
+    .all(sessionId, currentUserMsgId, max);
+  rows.reverse();
+  return rows.map((m) => ({ role: m.role, content: m.content }));
+}
+
 router.post('/sessions', requireEmbedToken, embedRateLimit, (req, res) => {
   const modelKey = resolveModelKey(req.embed);
   // Per-tenant workdir so workspace tools (Read/Write/Edit; Bash only if allow_bash) are
@@ -235,9 +251,24 @@ router.post('/sessions/:id/runs', requireEmbedToken, embedRateLimit, async (req,
   // Inline override (dbSession.system_prompt) is appended as a second
   // <system> block so persona stays the primary voice.
   const personaBlock = getPersonaBlock(req.embed.tenant_id);
+  const history = buildEmbedHistory(dbSession.id, userMsgId, 20);
+  const priorAssistantCount = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM messages
+         WHERE session_id = ? AND id < ? AND role = 'assistant'`
+    )
+    .get(dbSession.id, userMsgId)?.n || 0;
+
+  // Host UI often shows a client-side greeting bubble that is NOT stored
+  // as an assistant message. On the first model turn, tell the model not
+  // to re-introduce itself.
+  const noRegreetNote = priorAssistantCount === 0
+    ? `<system>\nThe host UI already greeted the user. Answer their message directly. Do not say hello again, do not re-introduce yourself, and do not ask "ada yang bisa dibantu?" unless they explicitly need a menu of options.\n</system>`
+    : `<system>\nContinue the conversation. Do not restart with a greeting or self-introduction.\n</system>`;
+
   const finalPrompt = buildEmbedPrompt({
     personaBlock,
-    systemPromptOverride: dbSession.system_prompt,
+    systemPromptOverride: [dbSession.system_prompt, noRegreetNote].filter(Boolean).join('\n\n'),
     userPrompt: safePrompt,
   });
 
@@ -280,7 +311,7 @@ router.post('/sessions/:id/runs', requireEmbedToken, embedRateLimit, async (req,
         model: dbSession.model,
         userId: null,                // platform system prompt is irrelevant for embed
         effort: undefined,
-        history: [],
+        history,
         embedTools,                   // Kategori B tools for this tenant
         embedDispatch: makeEmbedToolDispatcher({
           tenantId: req.embed.tenant_id,

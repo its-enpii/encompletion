@@ -170,7 +170,11 @@
     jsonFetch('/api/embed/sessions/' + STATE.sessionId + '/runs', { prompt: text })
       .then(function (data) {
         var runId = data.runId;
-        return openStream(data.sessionId, runId, assistantEl);
+        var ticket = data.streamTicket || data.stream_ticket || '';
+        if (!ticket) {
+          throw new Error('stream ticket missing from run response');
+        }
+        return openStream(data.sessionId, runId, ticket, assistantEl);
       })
       .catch(function (err) {
         assistantEl.textContent = 'Error: ' + err.message;
@@ -182,10 +186,15 @@
       });
   });
 
-  function openStream(sessionId, runId, assistantEl) {
-    // EventSource doesn't support custom headers — pass token via query.
+  function openStream(sessionId, runId, ticket, assistantEl) {
+    // EventSource can't set Authorization — pass embed_token + stream ticket in query.
+    // Ticket is required for embed runs (userId=null); embed_token alone is not enough.
     var src = new EventSource(
-      url('/api/embed/sessions/' + sessionId + '/runs/' + runId + '/stream?embed_token=' + encodeURIComponent(token))
+      url(
+        '/api/embed/sessions/' + sessionId + '/runs/' + runId +
+        '/stream?embed_token=' + encodeURIComponent(token) +
+        '&ticket=' + encodeURIComponent(ticket)
+      )
     );
     var buffer = '';
     return new Promise(function (resolve, reject) {
