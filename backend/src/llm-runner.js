@@ -226,10 +226,6 @@ const TOOLS = [
 ];
 
 const MAX_TOOL_RESULT_BYTES = 64 * 1024;
-const DEFAULT_TOOL_DEADLINE_MS = 30_000;
-const MAX_TOOL_ROUNDS = 10;
-// Default 1h — long reasoning / creative turns. Override with LLM_TIMEOUT_MS.
-const TURN_DEADLINE_MS_DEFAULT = Number(process.env.LLM_TIMEOUT_MS) || 3_600_000;
 
 /**
  * Resolve the system prompt for a user. Returns the saved row if the
@@ -321,7 +317,6 @@ export function runLLM(prompt, opts = {}, onEvent) {
           : [{ type: "text", text: "(attached image)" }, ...opts.images]
         : (prompt || ""),
   };
-  const turnDeadline = opts.turnDeadlineMs ?? TURN_DEADLINE_MS_DEFAULT;
   const sessionId = opts.sessionId || cryptoRandomId();
 
   // Emit init synchronously so the controller can be returned to
@@ -383,12 +378,10 @@ export function runLLM(prompt, opts = {}, onEvent) {
     const totals = { input_tokens: 0, output_tokens: 0 };
 
     try {
-      for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      // No max rounds / turn deadline — ends when model stops tool-calling,
+      // client kills the run, or upstream errors. Runaway = operator kill.
+      while (true) {
         if (aborted) return emitResult({ is_error: false });
-        if (Date.now() - startedAt > turnDeadline) {
-          onEvent({ type: "stderr", text: `turn deadline ${turnDeadline}ms exceeded\n` });
-          return emitResult({ is_error: true, error: "turn deadline exceeded" });
-        }
 
         let assistantTextThisRound = "";
         /** @type {Array<{id:string,name:string,arguments:string}>} */
@@ -600,7 +593,6 @@ export function runLLM(prompt, opts = {}, onEvent) {
             } else {
               r = await runTool(tc.name, args, {
                 cwd,
-                deadlineMs: args.deadline_ms || DEFAULT_TOOL_DEADLINE_MS,
                 // Even with allow_bash, embed must not phone home.
                 noNetworkEgress: true,
               });
@@ -608,7 +600,6 @@ export function runLLM(prompt, opts = {}, onEvent) {
           } else {
             r = await runTool(tc.name, args, {
               cwd,
-              deadlineMs: args.deadline_ms || DEFAULT_TOOL_DEADLINE_MS,
               noNetworkEgress: !!opts.embedDispatch,
             });
           }
@@ -621,8 +612,6 @@ export function runLLM(prompt, opts = {}, onEvent) {
         }
         // Loop continues to next round.
       }
-      onEvent({ type: "stderr", text: "max tool-call rounds reached\n" });
-      return emitResult({ is_error: true, error: "max rounds" });
     } catch (e) {
       onEvent({ type: "stderr", text: `LLM loop failed: ${e?.stack || e}\n` });
       emitResult({ is_error: true, error: e?.message || String(e) });

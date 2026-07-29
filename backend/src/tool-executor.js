@@ -9,8 +9,8 @@
  * Trust boundary:
  *   - endpoint_url is recorded in the DB by an admin, never accepted
  *     from the browser. So we trust it as much as we trust the DB row.
- *   - We still cap response body size and timeout so a misbehaving
- *     upstream can't pin the server.
+ *   - We still cap response body size so a misbehaving
+ *     upstream can't flood memory.
  *   - The HTTP call is signed with a per-request HMAC of the params
  *     using the tenant's active api_key. The saas-app verifies the
  *     signature in its middleware before trusting the body.
@@ -25,7 +25,6 @@ import db from './db/index.js';
 import { assertSafeHttpUrl, assertSafeResolvedHost } from './net-guard.js';
 
 const MAX_BODY_BYTES = 1 * 1024 * 1024;   // 1MB cap on response body
-const REQUEST_TIMEOUT_MS = parseInt(process.env.TOOL_TIMEOUT_MS || '8000', 10);
 // Pepper so HMAC is not forgeable from key_hash alone (DB dump).
 const SIGNING_PEPPER = process.env.TOOL_SIGNING_PEPPER || process.env.JWT_SECRET || 'dev-tool-pepper';
 
@@ -237,27 +236,21 @@ export async function executeHttpTool(tool, params, ctx) {
     headers['X-Encompletion-Key-Hash'] = sigKey.key_hash;
   }
 
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), REQUEST_TIMEOUT_MS);
-
   let res;
   try {
     res = await fetch(urlCheck.url.href, {
       method: 'POST',
       headers,
       body,
-      signal: ctl.signal,
       redirect: 'error', // never follow — could land on private IP
     });
   } catch (e) {
-    clearTimeout(timer);
     return finalizeExecution({
       ok: false,
       error: `request failed: ${e.message}`,
       tool, tenantId, externalUserId, messageId, params,
     });
   }
-  clearTimeout(timer);
 
   // Stream-read up to the cap; anything past the cap is treated as an
   // error rather than silently truncated.

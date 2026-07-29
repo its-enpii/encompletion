@@ -528,35 +528,6 @@ export default function Chat({
     return () => clearInterval(t);
   }, [streaming, lastTickAt]);
 
-  // Hard timeout — if streaming never resolves to a `result` event within
-  // TIMEOUT_MS (engine hung, socket silently dropped, etc), force the UI
-  // out of the loading state so the user isn't stuck with a perpetual
-  // TypingPill. We also re-pull the DB snapshot at this point because
-  // the most likely reason we're here is that the SSE socket was lost
-  // mid-stream and the assistant reply already landed in the DB — the
-  // local state just never got the `text` / `result` / `done` events.
-  // 1h matches long reasoning models; nginx stream proxy_read_timeout is 1h.
-  const TIMEOUT_MS = 3_600_000;
-  useEffect(() => {
-    if (!streaming) return;
-    const t = setTimeout(() => {
-      setStreaming((cur) => {
-        if (cur) {
-          // Best-effort recovery: re-fetch the session so a reply that
-          // landed in the DB but never reached the EventSource is still
-          // visible to the user. loadSession is async and will replace
-          // `messages` once it resolves.
-          if (sessionId != null) loadSession(sessionId).catch(() => {});
-          pushChatError(`Engine belum menjawab dalam ${TIMEOUT_MS / 1000}s. Coba kirim ulang atau pilih model lain.`);
-          return false;
-        }
-        return cur;
-      });
-      setLastTickAt(null);
-    }, TIMEOUT_MS);
-    return () => clearTimeout(t);
-  }, [streaming, sessionId]);
-
   // Window-level safety net: a drag that ends outside the chat area
   // (user drops on the sidebar, hits Esc, or drags off-window) doesn't
   // fire dragleave on our root, which would leave the overlay stuck.
@@ -652,8 +623,7 @@ export default function Chat({
         // followup `done` handler re-confirms the flip and reloads from
         // DB to recover the persisted assistant row. Without the
         // unconditional flip, a 1-2s run that completes before the
-        // EventSource subscribes leaves TypingPill stuck for the full
-        // 60s hard-timeout window.
+        // EventSource subscribes leaves TypingPill stuck.
         setStreaming(false);
         setLastTickAt(null);
         setInfo((cur) => cur ?? `cost $${(payload.cost ?? 0).toFixed(4)} · ${payload.durationMs ?? 0}ms`);

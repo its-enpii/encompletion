@@ -1,10 +1,10 @@
 /**
- * Bounded tool execution for the LLM runner.
+ * Tool execution for the LLM runner.
  *
  * Each tool returns { text: string, error?: string }. The runner emits
  * that string back to the model; we keep outputs small so a single
- * tool result can't flood the context window, and we cap wall-clock
- * time so a runaway `sleep 9999` can't lock up a turn forever.
+ * tool result can't flood the context window. No wall-clock deadline —
+ * stop is client kill only.
  *
  * The `cwd` passed in is the only filesystem root the tools see.
  * `Read` / `Write` / `Edit` resolve paths against `cwd` and refuse
@@ -19,7 +19,6 @@ import * as path from "node:path";
 import { assertSafeHttpUrl, assertSafeResolvedHost } from "./net-guard.js";
 
 const MAX_OUTPUT_BYTES = 64 * 1024;
-const DEFAULT_DEADLINE_MS = 30_000;
 
 /**
  * Dispatch table. Throws on unknown tool so the runner surfaces a
@@ -43,11 +42,11 @@ const handlers = {
   WebSearch: (args, ctx) => runWebSearch(args, ctx),
 };
 
-export async function runTool(name, args, { cwd, deadlineMs = DEFAULT_DEADLINE_MS, noNetworkEgress = false } = {}) {
+export async function runTool(name, args, { cwd, noNetworkEgress = false } = {}) {
   const handler = handlers[name];
   if (!handler) return { error: `unknown tool: ${name}` };
   try {
-    return await handler(args ?? {}, { cwd, deadlineMs, noNetworkEgress });
+    return await handler(args ?? {}, { cwd, noNetworkEgress });
   } catch (e) {
     return { error: e?.message || String(e) };
   }
@@ -118,17 +117,6 @@ function resolveSafe(target, cwd) {
   return real;
 }
 
-function withDeadline(promise, ms, killFn) {
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => {
-      try { killFn?.(); } catch {}
-      reject(new Error(`tool deadline ${ms}ms exceeded`));
-    }, ms);
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-}
-
 // Whitelist env passed to child shells. API keys and tokens stay in the
 // Node process; the model can only see what's safe for a sandboxed shell.
 const SHELL_ALLOWED_ENV_KEYS = new Set([
@@ -148,7 +136,7 @@ function safeChildEnv() {
   return env;
 }
 
-async function runBash({ command }, { cwd, deadlineMs, noNetworkEgress }) {
+async function runBash({ command }, { cwd, noNetworkEgress }) {
   if (!command || typeof command !== "string") return { error: "command is required" };
   if (command.length > 32 * 1024) return { error: "command too long" };
   // Embed mode: refuse network-capable binaries before they spawn.
@@ -164,28 +152,23 @@ async function runBash({ command }, { cwd, deadlineMs, noNetworkEgress }) {
       return { error: `network egress blocked in embed mode (binary: ${blocked})` };
     }
   }
-  let proc;
-  return withDeadline(
-    new Promise((resolve) => {
-      proc = spawn("/bin/sh", ["-c", command], {
-        cwd,
-        env: { ...safeChildEnv(), EMBED_NETWORK_DISABLED: noNetworkEgress ? "1" : "0" },
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      let out = "";
-      let err = "";
-      proc.stdout.on("data", (d) => { if (out.length < MAX_OUTPUT_BYTES) out += d.toString(); });
-      proc.stderr.on("data", (d) => { if (err.length < MAX_OUTPUT_BYTES) err += d.toString(); });
-      proc.on("error", (e) => resolve({ error: e.message }));
-      proc.on("close", (code, signal) => {
-        const combined = (out + (err ? `\n[stderr]\n${err}` : "")).trimEnd();
-        const suffix = signal ? `\n[killed: ${signal}]` : (code === 0 ? "" : `\n[exit ${code}]`);
-        resolve(truncateOk({ text: combined + suffix }, MAX_OUTPUT_BYTES));
-      });
-    }),
-    deadlineMs,
-    () => { try { proc?.kill("SIGKILL"); } catch {} }
-  );
+  return new Promise((resolve) => {
+    const proc = spawn("/bin/sh", ["-c", command], {
+      cwd,
+      env: { ...safeChildEnv(), EMBED_NETWORK_DISABLED: noNetworkEgress ? "1" : "0" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let out = "";
+    let err = "";
+    proc.stdout.on("data", (d) => { if (out.length < MAX_OUTPUT_BYTES) out += d.toString(); });
+    proc.stderr.on("data", (d) => { if (err.length < MAX_OUTPUT_BYTES) err += d.toString(); });
+    proc.on("error", (e) => resolve({ error: e.message }));
+    proc.on("close", (code, signal) => {
+      const combined = (out + (err ? `\n[stderr]\n${err}` : "")).trimEnd();
+      const suffix = signal ? `\n[killed: ${signal}]` : (code === 0 ? "" : `\n[exit ${code}]`);
+      resolve(truncateOk({ text: combined + suffix }, MAX_OUTPUT_BYTES));
+    });
+  });
 }
 
 async function runRead({ path: p, start_line, end_line }, { cwd }) {
@@ -260,7 +243,7 @@ async function runGlob({ pattern }, { cwd }) {
   // and *, and we cap the result count.
   return runBash(
     { command: `find . -path ${shellQuote(pattern)} -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/.next/*' 2>/dev/null | head -200` },
-    { cwd, deadlineMs: DEFAULT_DEADLINE_MS }
+    { cwd }
   );
 }
 
@@ -273,7 +256,7 @@ async function runGrep({ pattern, path: target, include_glob }, { cwd }) {
   const searchPath = target ? shellQuote(target) : ".";
   return runBash(
     { command: `grep -rnE ${include} -- ${shellQuote(pattern)} ${searchPath} 2>/dev/null | grep -v 'node_modules/\\|.git/\\|.next/' | head -300` },
-    { cwd, deadlineMs: DEFAULT_DEADLINE_MS }
+    { cwd }
   );
 }
 
@@ -306,36 +289,32 @@ function truncateOk(obj, max) {
  * BRAVE_SEARCH_API_KEY is set; otherwise DuckDuckGo Instant Answer +
  * lite HTML organic results (no key). Never shells out.
  */
-async function runWebSearch({ query, max_results }, { deadlineMs, noNetworkEgress }) {
+async function runWebSearch({ query, max_results }, { noNetworkEgress }) {
   if (noNetworkEgress) return { error: "network egress blocked" };
   if (!query || typeof query !== "string") return { error: "query is required" };
   const q = query.trim().slice(0, 400);
   if (!q) return { error: "query is required" };
   const limit = Math.min(Math.max(Number(max_results) || 5, 1), 10);
-  const deadline = Math.min(deadlineMs || DEFAULT_DEADLINE_MS, 20_000);
   const braveKey = (process.env.BRAVE_SEARCH_API_KEY || "").trim();
 
   try {
     if (braveKey) {
-      const r = await searchBrave(q, limit, braveKey, deadline);
+      const r = await searchBrave(q, limit, braveKey);
       if (!r.error) return r;
       // Fall through to DDG if Brave errors (quota/network).
     }
-    return await searchDuckDuckGo(q, limit, deadline);
+    return await searchDuckDuckGo(q, limit);
   } catch (e) {
     return { error: e?.message || String(e) };
   }
 }
 
-async function searchBrave(query, limit, apiKey, deadlineMs) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), deadlineMs);
+async function searchBrave(query, limit, apiKey) {
   try {
     const url =
       "https://api.search.brave.com/res/v1/web/search?" +
       new URLSearchParams({ q: query, count: String(limit) }).toString();
     const r = await fetch(url, {
-      signal: controller.signal,
       headers: {
         Accept: "application/json",
         "X-Subscription-Token": apiKey,
@@ -363,16 +342,11 @@ async function searchBrave(query, limit, apiKey, deadlineMs) {
     lines.push("Cite URLs in your reply. Use WebFetch to read a specific page.");
     return truncateOk({ text: lines.join("\n").trim() }, MAX_OUTPUT_BYTES);
   } catch (e) {
-    if (e?.name === "AbortError") return { error: `request aborted after ${deadlineMs}ms` };
     return { error: e?.message || String(e) };
-  } finally {
-    clearTimeout(timer);
   }
 }
 
-async function searchDuckDuckGo(query, limit, deadlineMs) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), deadlineMs);
+async function searchDuckDuckGo(query, limit) {
   try {
     const lines = [`Web search (DuckDuckGo): ${query}`, ""];
     let n = 0;
@@ -387,7 +361,6 @@ async function searchDuckDuckGo(query, limit, deadlineMs) {
         skip_disambig: "1",
       }).toString();
     const iaRes = await fetch(iaUrl, {
-      signal: controller.signal,
       headers: {
         Accept: "application/json",
         "User-Agent": "encompletion/1.0 (WebSearch)",
@@ -435,7 +408,6 @@ async function searchDuckDuckGo(query, limit, deadlineMs) {
         "https://lite.duckduckgo.com/lite/?" +
         new URLSearchParams({ q: query }).toString();
       const liteRes = await fetch(liteUrl, {
-        signal: controller.signal,
         headers: {
           Accept: "text/html",
           "User-Agent": "encompletion/1.0 (WebSearch)",
@@ -460,10 +432,7 @@ async function searchDuckDuckGo(query, limit, deadlineMs) {
     lines.push("Cite URLs in your reply. Use WebFetch to read a specific page.");
     return truncateOk({ text: lines.join("\n").trim() }, MAX_OUTPUT_BYTES);
   } catch (e) {
-    if (e?.name === "AbortError") return { error: `request aborted after ${deadlineMs}ms` };
     return { error: e?.message || String(e) };
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -493,7 +462,7 @@ function parseDdgLiteResults(html) {
   return out;
 }
 
-async function runWebFetch({ url, max_bytes }, { deadlineMs, noNetworkEgress }) {
+async function runWebFetch({ url, max_bytes }, { noNetworkEgress }) {
   if (noNetworkEgress) return { error: "network egress blocked" };
   if (!url || typeof url !== "string") return { error: "url is required" };
   const parsed = assertSafeHttpUrl(url);
@@ -502,9 +471,6 @@ async function runWebFetch({ url, max_bytes }, { deadlineMs, noNetworkEgress }) 
   if (!dns.ok) return { error: dns.error };
 
   const cap = Math.min(Math.max(max_bytes || 256 * 1024, 4096), 1024 * 1024);
-  const controller = new AbortController();
-  const deadline = Math.min(deadlineMs || DEFAULT_DEADLINE_MS, 30_000);
-  const timer = setTimeout(() => controller.abort(), deadline);
 
   // Manual redirect follow so each hop re-validates host/DNS (no open
   // redirect into 10/8 via Location). Cap hops at 5.
@@ -514,7 +480,6 @@ async function runWebFetch({ url, max_bytes }, { deadlineMs, noNetworkEgress }) 
     for (let hop = 0; hop < 5; hop++) {
       r = await fetch(current, {
         redirect: "manual",
-        signal: controller.signal,
         headers: {
           "User-Agent": "claude-web/1.0 (WebFetch tool)",
           "Accept": "text/html, application/json, text/plain;q=0.9, */*;q=0.5",
@@ -544,10 +509,7 @@ async function runWebFetch({ url, max_bytes }, { deadlineMs, noNetworkEgress }) 
     if (ctype.includes("text/html")) text = htmlToText(text);
     return truncateOk({ text }, MAX_OUTPUT_BYTES);
   } catch (e) {
-    if (e?.name === "AbortError") return { error: `request aborted after ${deadline}ms` };
     return { error: e?.message || String(e) };
-  } finally {
-    clearTimeout(timer);
   }
 }
 
