@@ -4,7 +4,7 @@
  * Skill directory convention: `<root>/<name>/SKILL.md`. Default lives
  * at `$HOME/.enllm/skills/` — engine-neutral, so it doesn't require
  * any Claude CLI binary to be installed. Skills are exposed to the
- * model via two tool calls (`Skill.list` + `Skill.read`) so the model
+ * model via two tool calls (`Skill_list` + `Skill_read`) so the model
  * can discover the catalog and pull only what it needs.
  *
  * Earlier iterations of this file reused the Claude CLI path
@@ -123,11 +123,12 @@ function parseFrontmatter(text) {
   return { raw: body, description };
 }
 
+// Names must match ^[a-zA-Z0-9_-]+$ — OpenAI/Codex reject dots in tool names.
 export const skillTools = [
   {
     type: "function",
     function: {
-      name: "Skill.list",
+      name: "Skill_list",
       description: "List installed skills (name + one-line description). Use this before reading a skill to confirm the catalog.",
       parameters: { type: "object", properties: {}, required: [] },
     },
@@ -135,8 +136,8 @@ export const skillTools = [
   {
     type: "function",
     function: {
-      name: "Skill.read",
-      description: "Read a skill's full instruction file by name. Returns the SKILL.md content. Use after Skill.list when you need the full procedure for a task the description hints at.",
+      name: "Skill_read",
+      description: "Read a skill's full instruction file by name. Returns the SKILL.md content. Use after Skill_list when you need the full procedure for a task the description hints at.",
       parameters: {
         type: "object",
         properties: {
@@ -150,7 +151,7 @@ export const skillTools = [
 
 export async function runSkillTool(name, args, { disabled = [] } = {}) {
   const skip = new Set(disabled.filter((n) => typeof n === "string"));
-  if (name === "Skill.list") return { text: JSON.stringify(listSkills(disabled), null, 2) };
-  if (name === "Skill.read") return readSkill(args?.name || "", skip);
+  if (name === "Skill_list") return { text: JSON.stringify(listSkills(disabled), null, 2) };
+  if (name === "Skill_read") return readSkill(args?.name || "", skip);
   return { error: `unknown skill tool: ${name}` };
 }

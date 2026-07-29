@@ -51,7 +51,7 @@ artifacts inside the session workspace before publishing with EmitArtifact.
 Do not treat the workspace as a project repo to "build" or "run". Prefer
 EmitArtifact directly when a single file is enough.
 
-Skill.list / Skill.read: if a skill matches the request, list then read it
+Skill_list / Skill_read: if a skill matches the request, list then read it
 and follow its procedure.
 
 Web research:
@@ -259,7 +259,7 @@ export function runLLM(prompt, opts = {}, onEvent) {
   const modelName = opts.model || process.env.LLM_DEFAULT_MODEL || "workspace";
   const cwd = opts.cwd || process.cwd();
   // Per-project opt-outs: a disabled skill name is invisible to both
-  // Skill.list and Skill.read. Snapshot once at turn start so a model
+  // Skill_list and Skill_read. Snapshot once at turn start so a model
   // that re-lists mid-conversation can't see different content.
   const disabledSkills = Array.isArray(opts.disabledSkills) ? opts.disabledSkills : [];
   // Build the initial messages array. Vision recall across turns goes via
@@ -564,9 +564,9 @@ export function runLLM(prompt, opts = {}, onEvent) {
           }
           onEvent({ type: "tool_use", id: tc.id, name: tc.name, input: args });
           let r;
-          // Skill.* and EmitArtifact are routed separately — they
+          // Skill_* and EmitArtifact are routed separately — they
           // don't touch the filesystem or run a deadline-bound process.
-          if (tc.name === "Skill.list" || tc.name === "Skill.read") {
+          if (tc.name === "Skill_list" || tc.name === "Skill_read") {
             r = await runSkillTool(tc.name, args, { disabled: disabledSkills });
           } else if (tc.name === "EmitArtifact") {
             // Embed mode gating: tenants with allow_artifact_generation=0

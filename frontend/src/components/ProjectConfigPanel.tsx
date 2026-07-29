@@ -758,7 +758,7 @@ export default function ProjectConfigPanel({ projectId }: Props) {
 
         {/* Skills — per-project opt-out. The catalog is global but
             each project can shadow a name here so the LLM never sees
-            it (Skill.list and Skill.read return the filtered set
+            it (Skill_list and Skill_read return the filtered set
             for any chat bound to this project). Edit toggles mark
             the project dirty so saveMeta persists everything in
             one PATCH. */}

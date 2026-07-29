@@ -40,7 +40,7 @@ Awalnya backend spawn subprocess `claude --output-format stream-json` dan pipe k
 - **`llm-runner.js`**: HTTP streaming chat-completions. Bangun pesan (system + history + hasil tool), loop sampai model berhenti minta tool, emit `text`/`tool_use`/`tool_result`/`result` lewat `EventEmitter`. Controller expose `{ kill, proc }` supaya `server.js` bisa persist pesan + cancel.
 - **`db/index.js`**: SQLite WAL, migrasi in-place idempotent (`ALTER TABLE ADD COLUMN` kalau kolom belum ada). Skema: `users`, `user_settings`, `projects`, `sessions`, `messages`, `attachments`, `artifacts`, `api_keys`, `models`, `skills`.
 - **`run-registry.js`**: peta runId → emitter, supaya SSE handler push event dari runner di request terpisah.
-- **`tools.js`** + **`skill_loader.js`**: tool ke model (`Read`, `Write`, `Edit`, `Bash`, `Skill.list`, `Skill.read`). Skill di `$HOME/.enllm/skills/` (global per user, bukan per session).
+- **`tools.js`** + **`skill_loader.js`**: tool ke model (`Read`, `Write`, `Edit`, `Bash`, `Skill_list`, `Skill_read`). Skill di `$HOME/.enllm/skills/` (global per user, bukan per session).
 - **`rag.js`**: chunk dokumen per project, embed `@xenova/transformers`, retrieve top-k saat prompt masuk.
 
 ### Frontend

@@ -37,7 +37,7 @@ docker compose up -d --build
 - **API keys**: kunci scoped per model, untuk `POST /v1/chat/completions` (OpenAI-compatible)
 - **Users & roles**: `admin` vs `user`, bootstrap user pertama otomatis
 - **RAG**: chunking + embedding (`@xenova/transformers`), retrieval per project
-- **Skills**: prosedur di `$HOME/.enllm/skills/`, dipanggil lewat `Skill.list` / `Skill.read`
+- **Skills**: prosedur di `$HOME/.enllm/skills/`, dipanggil lewat `Skill_list` / `Skill_read`
 
 ## Struktur
 
@@ -50,7 +50,7 @@ backend/                Node + Express + SSE
   src/routes/           auth, users, sessions, projects, attachments,
                         skills, models, artifacts, api-keys, v1, runs
   src/tools.js          Built-in tool implementations
-  src/skill_loader.js   Skill.list / Skill.read
+  src/skill_loader.js   Skill_list / Skill_read
   src/rag.js            Chunk + embed + retrieve
   src/artifact-detector.js
   src/run-registry.js   In-memory run state for streaming

@@ -169,6 +169,10 @@ router.post('/tenants/:id/tools', (req, res) => {
   if (!name?.trim() || !description || !json_schema || !endpoint_url) {
     return res.status(400).json({ error: 'name, description, json_schema, endpoint_url required' });
   }
+  // OpenAI/Codex: tools[].name must match ^[a-zA-Z0-9_-]+$ (no dots).
+  if (!/^[a-zA-Z0-9_-]+$/.test(String(name).trim())) {
+    return res.status(400).json({ error: "tool name must match ^[a-zA-Z0-9_-]+$ (no dots/spaces)" });
+  }
   // http(s) only + block private/loopback hosts (SSRF via tool executor).
   const urlOk = assertSafeHttpUrl(endpoint_url);
   if (!urlOk.ok) return res.status(400).json({ error: `invalid endpoint_url: ${urlOk.error}` });
