@@ -91,30 +91,35 @@ function classifyLine(raw) {
   m = t.match(/^\d+[.)]\s+(.+)$/);
   if (m) return { kind: 'bullet', text: m[1].trim() };
   return { kind: 'p', text: t };
+}
 
-    function parseTables(lines) {
-      const blocks = [];
-      let i = 0;
-      while (i < lines.length) {
-        if (lines[i].trim() === '') { i++; continue; }
-        const headerRow = lines[i];
-        const sepRow = lines[i + 1];
-        if (!sepRow || !sepRow.includes('|') || !sepRow.includes('-')) { i++; continue; }
-        const align = sepRow.match(/:?-+:?/g) || [];
-        const cells = headerRow.split('|').map(c => c.trim());
-        if (cells.length < 2) { i++; continue; }
-        const table = { header: cells.slice(1), align, rows: [] };
-        i += 2;
-        while (i < lines.length && lines[i].includes('|')) {
-          const row = lines[i].split('|').map(c => c.trim());
-          if (row.length > 1) table.rows.push(row.slice(1));
-          i++;
-        }
-        blocks.push({ kind: 'table', table });
-        continue;
-      }
-      return blocks;
+/**
+ * Parse a line array into markdown blocks, detecting GFM tables.
+ * Module-scope so buildPdf/buildDocx can call it before their own bodies run.
+ * @param {string[]} lines
+ * @returns {Array<object>}
+ */
+function parseTables(lines) {
+  const blocks = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].trim() === '') { i++; continue; }
+    const headerRow = lines[i];
+    const sepRow = lines[i + 1];
+    if (!sepRow || !sepRow.includes('|') || !sepRow.includes('-')) { i++; continue; }
+    const align = sepRow.match(/:?-+:?/g) || [];
+    const cells = headerRow.split('|').map(c => c.trim());
+    if (cells.length < 2) { i++; continue; }
+    const table = { header: cells.slice(1), align, rows: [] };
+    i += 2;
+    while (i < lines.length && lines[i].includes('|')) {
+      const row = lines[i].split('|').map(c => c.trim());
+      if (row.length > 1) table.rows.push(row.slice(1));
+      i++;
     }
+    blocks.push({ kind: 'table', table });
+  }
+  return blocks;
 }
 
 /**
@@ -143,30 +148,7 @@ export function buildPdf({ title, lines, text } = {}) {
       autoFirstPage: true,
     });
 
-    // === NEW: parse GFM tables ===
-    function parseTables(lines) {
-      const blocks = [];
-      let i = 0;
-      while (i < lines.length) {
-        if (lines[i].trim() === '') { i++; continue; }
-        const headerRow = lines[i];
-        const sepRow = lines[i + 1];
-        if (!sepRow || !sepRow.includes('|') || !sepRow.includes('-')) { i++; continue; }
-        const align = sepRow.match(/:?-+:?/g) || [];
-        const cells = headerRow.split('|').map(c => c.trim());
-        if (cells.length < 2) { i++; continue; }
-        const table = { header: cells.slice(1), align, rows: [] };
-        i += 2;
-        while (i < lines.length && lines[i].includes('|')) {
-          const row = lines[i].split('|').map(c => c.trim());
-          if (row.length > 1) table.rows.push(row.slice(1));
-          i++;
-        }
-        blocks.push({ kind: 'table', table });
-        continue;
-      }
-      return blocks;
-    }
+    // Tables already parsed at module scope (see parseTables above).
     const chunks = [];
     doc.on('data', (c) => chunks.push(c));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
@@ -230,6 +212,7 @@ export function buildPdf({ title, lines, text } = {}) {
         doc.moveDown(0.25);
         continue;
       }
+      if (b.kind === 'h1') {
         doc.moveDown(0.35);
         doc.font('Helvetica-Bold').fontSize(14).fillColor('#1A1410')
           .text(t, { width: contentW, align: 'left' });
