@@ -234,9 +234,9 @@ function loadCandidateChunks({ scopeUserId, sessionId }) {
            FROM embeddings_chunk c
            JOIN projects p ON p.id = c.source_id
            WHERE c.source_kind = 'project_knowledge'
-             AND p.owner_type = 'user' AND p.owner_id = ?
+             AND p.user_id = ?
              AND p.archived_at IS NULL`
-      ).all(String(scopeUserId));
+      ).all(Number(scopeUserId));
       out.push(...r);
     }
   } else {
@@ -258,8 +258,8 @@ function loadCandidateChunks({ scopeUserId, sessionId }) {
            JOIN sessions s ON s.id = es.session_id
            WHERE c.source_kind = 'attachment'
              AND es.session_id = ?
-             AND s.owner_type = 'user' AND s.owner_id = ?`
-      ).all(sessionId, String(scopeUserId));
+             AND s.user_id = ?`
+      ).all(sessionId, Number(scopeUserId));
       out.push(...r);
     } else {
       const r = db.prepare(
@@ -286,19 +286,16 @@ function loadCandidateChunks({ scopeUserId, sessionId }) {
       ).all();
       out.push(...r);
     } else {
-      // messages doesn't carry user_id; route through sessions.owner_id
-      // (already filtered to owner_type='user'). One extra hop, but the
-      // index on embeddings_session(session_id) covers it.
+      // messages doesn't carry user_id; hop via sessions.user_id.
+      // Index on embeddings_session(session_id) covers the join.
       const r = db.prepare(
         `SELECT c.id, c.source_kind, c.source_id, c.chunk_index, c.content, c.vec
            FROM embeddings_chunk c
            JOIN embeddings_session es ON es.chunk_id = c.id
            JOIN sessions s ON s.id = es.session_id
           WHERE c.source_kind = 'user_message'
-            AND s.owner_type = 'user'
-            AND s.owner_id = ?
             AND s.user_id = ?`
-      ).all(String(scopeUserId), Number(scopeUserId));
+      ).all(Number(scopeUserId));
       out.push(...r);
     }
   }

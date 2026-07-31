@@ -255,7 +255,7 @@ export function ModelsDialog({ open, onClose }: { open: boolean; onClose: () => 
             ? "Memuat…"
             : me?.role !== "admin"
               ? "Hanya admin yang dapat melihat halaman ini."
-              : "Kelola model yang tersedia di dropdown chat. Daftar ini hanya memfilter apa yang dikirim lewat --model ke backend."
+              : "Kelola model yang tersedia di dropdown chat. Key dikirim ke provider LLM sebagai model id."
         }
         headerActions={headerActions}
       >
@@ -570,7 +570,7 @@ function ModelDialog({
       open
       onClose={() => { if (!busy) onClose(); }}
       title={isEdit ? `Edit model: ${(value as any).model.label}` : "Tambah model"}
-      description="Key dikirim ke backend engine via CLI flag. Bebas karakter apapun selama non-kosong dan tanpa spasi."
+      description="Key = model id ke provider LLM (LLM_BASE_URL). Non-kosong, tanpa spasi."
       widthClass="max-w-md"
       footer={
         <>
@@ -584,12 +584,12 @@ function ModelDialog({
       <div className="space-y-4">
         {!isEdit && (
           <TextField
-            label="Key (CLI flag)"
+            label="Key (model id)"
             value={key}
             onChange={(e) => setKey(e.target.value)}
             placeholder="model-key"
             autoFocus
-            hint="Tanpa spasi. Dipakai sebagai flag model ke backend."
+            hint="Tanpa spasi. Id model di provider (mis. claude-sonnet-4-6)."
           />
         )}
         <TextField

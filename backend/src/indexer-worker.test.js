@@ -9,7 +9,7 @@
  * Coverage:
  *  1. Worker finds unindexed messages → embeds + bumps timestamp
  *  2. Already-indexed messages are skipped
- *  3. Embed/tenant session messages skipped
+ *  3. Already-indexed messages skipped
  *  4. Embedder error → no timestamp bump; tick stops early
  *  5. Batch cap respected (BATCH_MAX per tick)
  *
@@ -47,21 +47,20 @@ function seedUser(name = 'iw-' + crypto.randomBytes(3).toString('hex')) {
   return Number(id);
 }
 
-function seedSession(userId, ownerType = 'user') {
+function seedSession(userId) {
   const id = db
     .prepare(
-      `INSERT INTO sessions (title, model, user_id, owner_type, owner_id)
-       VALUES (?, 'workspace', ?, ?, ?)`
+      `INSERT INTO sessions (title, model, user_id)
+       VALUES (?, 'workspace', ?)`
     )
-    .run(`iw-${crypto.randomBytes(3).toString('hex')}`, userId, ownerType, String(userId)).lastInsertRowid;
+    .run(`iw-${crypto.randomBytes(3).toString('hex')}`, userId).lastInsertRowid;
   seeded.sessions.push(Number(id));
   return Number(id);
 }
 
 function seedMessage(sessionId, userId, content, indexed = false) {
   // messages has no user_id column — accept userId for ergonomics but
-  // don't write it. User scoping is via sessions.owner_id at the rag
-  // layer.
+  // don't write it. User scoping is via sessions.user_id at the rag layer.
   if (indexed) {
     const id = db
       .prepare(
@@ -146,16 +145,6 @@ test('already-indexed messages are skipped', { concurrency: false }, async () =>
   assert.ok(r.last_indexed_at);
   const c = db.prepare(`SELECT COUNT(*) AS n FROM embeddings_chunk WHERE source_kind = 'user_message' AND source_id = ?`).get(m1);
   assert.equal(c.n, 0, 'no chunk inserted for already-indexed message');
-});
-
-test('embed/tenant session messages are skipped', { concurrency: false }, async () => {
-  const userId = seedUser();
-  // Create a tenant-owned session (owner_type='tenant').
-  const sid = seedSession(userId, 'tenant');
-  const mid = seedMessage(sid, userId, 'Embed session content IOTA-FOO');
-  await runOnce();
-  const r = db.prepare(`SELECT last_indexed_at FROM messages WHERE id = ?`).get(mid);
-  assert.equal(r.last_indexed_at, null, 'embed session message skipped');
 });
 
 test('embedder error → no timestamp bump; tick stops early', { concurrency: false }, async () => {

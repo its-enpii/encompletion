@@ -362,9 +362,9 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
       .prepare(
         `SELECT id FROM projects
           WHERE id = ? AND archived_at IS NULL
-            AND (owner_type = 'user' AND owner_id = ? OR ? = 'admin')`
+            AND (user_id = ? OR ? = 'admin')`
       )
-      .get(projectId, String(req.user.id), req.user.role);
+      .get(projectId, req.user.id, req.user.role);
     if (!own) return res.status(403).json({ error: 'project not accessible' });
   }
 
@@ -400,8 +400,8 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
     }
     const info = db
       .prepare(
-        `INSERT INTO sessions (title, model, project_id, system_prompt, user_id, owner_type, owner_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 'user', ?, ?, ?)`
+        `INSERT INTO sessions (title, model, project_id, system_prompt, user_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         // Use a generic placeholder for new sessions — the real title is
@@ -414,7 +414,6 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
         projectId || null,
         systemPrompt || null,
         req.user.id,
-        String(req.user.id),
         new Date().toISOString(),
         new Date().toISOString()
       );
@@ -617,10 +616,14 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
       toolsEnabled: !!(safePrompt || !imageParts || imageParts.length === 0),
       history: historyMessages,
       cwd: runCwd,
+      sessionId: dbSession.id,
     },
     (evt) => {
       // Compact one-line summary at boundaries; text deltas captured
       // separately when we suspect FE drop.
+      // Heartbeat for FE stale detector — any progress resets "no heartbeat".
+      registry.emit(runId, 'tick', { sessionId: dbSession.id, t: Date.now() });
+
       if (evt.type === 'text') {
         if (typeof evt.text === 'string' && evt.text.length > 0) {
           assistantFullText += evt.text;
@@ -631,8 +634,9 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
         evt.type === 'stderr' || evt.type === 'tool_use' ||
         evt.type === 'tool_result' || evt.type === 'error'
       ) {
+        const extra = evt.name || evt.tool_use_id || evt.errorMessage || evt.message || evt.text || '';
         process.stderr.write(
-          `[runner ${dbSession.id}] ${evt.type}${evt.subtype ? '/' + evt.subtype : ''} ${evt.errorMessage || evt.message || evt.text || ''}`.trim() + '\n'
+          `[runner ${dbSession.id}] ${evt.type}${evt.subtype ? '/' + evt.subtype : ''}${extra ? ' ' + String(extra).slice(0, 120) : ''}`.trim() + '\n'
         );
       }
       if (evt.type === 'system' && evt.subtype === 'init') {
@@ -641,6 +645,50 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
           sessionId: dbSession.id,
           claudeSessionId: cliSessionId,
           model: evt.model,
+        });
+      } else if (evt.type === 'tool_use') {
+        // Flat events from llm-runner (not Claude CLI assistant-block shape).
+        const id = evt.id || evt.tool_use_id;
+        const name = evt.name || evt.tool_name || 'unknown';
+        const input = evt.input ?? null;
+        if (id) {
+          toolStartedAt.set(id, Date.now());
+          pendingToolUses.set(id, { toolName: name, input });
+        }
+        registry.emit(runId, 'tool_use', {
+          sessionId: dbSession.id,
+          tool_use_id: id,
+          tool_name: name,
+          input,
+        });
+      } else if (evt.type === 'tool_result') {
+        const id = evt.tool_use_id || evt.id;
+        const pending = id ? pendingToolUses.get(id) : null;
+        let output = evt.content;
+        if (typeof output !== 'string') output = JSON.stringify(output ?? null);
+        const startedAtTool = id ? toolStartedAt.get(id) : null;
+        toolRecords.push({
+          tool_use_id: id,
+          tool_name: pending?.toolName || evt.name || 'unknown',
+          input: JSON.stringify(pending?.input ?? null),
+          output,
+          is_error: evt.is_error ? 1 : 0,
+          duration_ms: startedAtTool ? Date.now() - startedAtTool : null,
+        });
+        if (id) {
+          pendingToolUses.delete(id);
+          toolStartedAt.delete(id);
+        }
+        if (evt.is_error) {
+          process.stderr.write(
+            `[runner ${dbSession.id}] tool_error ${pending?.toolName || 'unknown'}: ${String(output).slice(0, 200)}\n`
+          );
+        }
+        registry.emit(runId, 'tool_result', {
+          sessionId: dbSession.id,
+          tool_use_id: id,
+          content: output,
+          is_error: !!evt.is_error,
         });
       } else if (evt.type === 'assistant') {
         const blocks = evt.message?.content || [];
@@ -758,7 +806,7 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
            ORDER BY id ASC LIMIT 1`
       );
       for (const art of pendingToolArtifacts) {
-        if (!art.content) continue;
+        if (!art.content && !art.file_path) continue;
         const existing = art.content_hash
           ? findDupStmtTool.get(dbSession.id, art.content_hash)
           : null;
@@ -766,13 +814,14 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
           db.prepare(
             `INSERT INTO artifacts
                (session_id, message_id, type, language, title, content,
-                version, content_hash, dup_of)
-             VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`
+                version, content_hash, dup_of, file_path, mime_type, file_size)
+             VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`
           ).run(
             dbSession.id, activeMsgId,
             art.type || 'code', art.language || null,
-            art.title || 'Artifact', art.content,
-            art.content_hash || null, existing.id
+            art.title || 'Artifact', art.content || '',
+            art.content_hash || null, existing.id,
+            art.file_path || null, art.mime_type || null, art.file_size || null
           );
           registry.emit(runId, 'artifact_dup', {
             duplicate_of: existing.id, title: art.title, type: art.type, message_id: activeMsgId,
@@ -782,13 +831,14 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
         const insert = db.prepare(
           `INSERT INTO artifacts
              (session_id, message_id, type, language, title, content,
-              version, content_hash, dup_of)
-           VALUES (?, ?, ?, ?, ?, ?, 1, ?, NULL)`
+              version, content_hash, dup_of, file_path, mime_type, file_size)
+           VALUES (?, ?, ?, ?, ?, ?, 1, ?, NULL, ?, ?, ?)`
         ).run(
           dbSession.id, activeMsgId,
           art.type || 'code', art.language || null,
-          art.title || 'Artifact', art.content,
-          art.content_hash || null
+          art.title || 'Artifact', art.content || '',
+          art.content_hash || null,
+          art.file_path || null, art.mime_type || null, art.file_size || null
         );
         registry.emit(runId, 'artifact', {
           id: insert.lastInsertRowid,
@@ -799,8 +849,13 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
           title: art.title || 'Artifact',
           content: art.content,
           content_preview: (art.content || '').slice(0, 220),
-          line_count: (art.content || '').split('\n').length,
+          line_count: art.file_size
+            ? Math.max(1, Math.round(art.file_size / 80))
+            : (art.content || '').split('\n').length,
           content_hash: art.content_hash || null,
+          file_path: art.file_path || null,
+          mime_type: art.mime_type || null,
+          file_size: art.file_size || null,
           version: 1,
           source: 'tool',
         });

@@ -152,7 +152,7 @@ export function Composer({
                 for (const f of files) dt.items.add(f);
                 onFiles(dt.files);
               }}
-              placeholder={streaming ? "Sedang berpikir…" : "Tulis pesan… tekan Enter untuk kirim, Shift+Enter untuk baris baru"}
+              placeholder={streaming ? "Sedang bekerja…" : "Pesan, lampiran, atau minta plan/file… Enter kirim"}
               rows={1}
               disabled={streaming}
               className="block w-full resize-none bg-transparent px-5 pb-3 pt-4 text-[14px] leading-relaxed text-[var(--ink)] placeholder:text-[var(--ink-3)] focus:outline-none disabled:opacity-60"
@@ -206,7 +206,7 @@ export function Composer({
         </div>
 
         <p className="mt-2 text-center text-[11px] text-[var(--ink-3)]">
-          AI dapat membuat kesalahan · Verifikasi info penting
+          Lampiran · plan/PRD · Excel/PDF/PPT · artifact di panel
         </p>
       </div>
     </div>

@@ -48,10 +48,10 @@ function seedUser(name = 'rec-' + crypto.randomBytes(3).toString('hex')) {
 function seedSession(userId) {
   const id = db
     .prepare(
-      `INSERT INTO sessions (title, model, user_id, owner_type, owner_id)
-       VALUES (?, 'workspace', ?, 'user', ?)`
+      `INSERT INTO sessions (title, model, user_id)
+       VALUES (?, 'workspace', ?)`
     )
-    .run(`rec-${crypto.randomBytes(3).toString('hex')}`, userId, String(userId)).lastInsertRowid;
+    .run(`rec-${crypto.randomBytes(3).toString('hex')}`, userId).lastInsertRowid;
   seeded.sessions.push(Number(id));
   return Number(id);
 }

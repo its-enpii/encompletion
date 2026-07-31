@@ -1,12 +1,12 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, isValidElement, type ReactNode } from "react";
+import { MermaidBlock } from "@/components/MermaidBlock";
 
 /**
- * Wraps a codeblock with a soft header (language badge + filename + copy)
- * and an eye-friendly code area. Receives the rendered <code> children from
- * react-markdown, which already contains the highlight.js spans — copying
- * the visible text strips those spans down to the raw source.
+ * Wraps a codeblock with a soft header (language badge + filename + copy).
+ * language-mermaid → live diagram (MermaidBlock).
+ * All hooks run unconditionally before any early return.
  */
 export function CodeBlock({
   className,
@@ -16,26 +16,38 @@ export function CodeBlock({
   const [copied, setCopied] = useState(false);
   const codeRef = useRef<HTMLPreElement | null>(null);
 
-  // Extract language from `language-xyz` added by rehype-highlight.
-  const lang = (() => {
-    const m = (className || "").match(/language-(\w+)/);
-    return m ? m[1] : "";
-  })();
+  const lang = useMemo(() => {
+    const fromPre = (className || "").match(/language-(\w+)/);
+    if (fromPre) return fromPre[1];
+    const child = Array.isArray(children) ? children[0] : children;
+    if (isValidElement(child)) {
+      const props = child.props as { className?: string };
+      const fromCode = (props.className || "").match(/language-(\w+)/);
+      if (fromCode) return fromCode[1];
+    }
+    return "";
+  }, [className, children]);
 
-  // Extract inline filename if the assistant wrote a "title: foo.ts" comment
-  // on the first line — common with the assistant when generating project files.
+  const plain = useMemo(() => extractPlainText(children).trim(), [children]);
+
+  const mermaidSource = lang === "mermaid" && plain ? plain : null;
+
   const inferredFile = useMemo(() => {
-    const txt = codeRef.current?.textContent || "";
+    const txt = plain || "";
     const m =
       txt.match(/^\/\/\s*([\w./-]+\.\w+)/) ||
       txt.match(/^#\s*([\w./-]+\.\w+)/) ||
       txt.match(/^<!--\s*([\w./-]+\.\w+)\s*-->/);
     return m ? m[1] : "";
-  }, [children]);
+  }, [plain]);
+
+  if (mermaidSource) {
+    return <MermaidBlock code={mermaidSource} />;
+  }
 
   function copyPlain() {
     const code = codeRef.current?.querySelector("code");
-    const text = code?.textContent ?? "";
+    const text = code?.textContent ?? plain;
     if (!text) return;
     navigator.clipboard
       .writeText(text)
@@ -51,8 +63,6 @@ export function CodeBlock({
       className="codeblock group/code my-4 overflow-hidden rounded-[var(--r-md)] border border-[#E8E5DD] bg-[#FAF8F3] shadow-[var(--shadow-1)]"
       data-lang={lang || "code"}
     >
-      {/* Header — warm beige top bar, slightly darker than the code area,
-         so the chrome reads as a distinct unit without yelling for attention */}
       <div className="flex items-center justify-between gap-2 border-b border-[#E8E5DD] bg-[#EFEBE0] px-3 py-1.5">
         <div className="flex min-w-0 items-center gap-2">
           {lang && (
@@ -103,4 +113,15 @@ export function CodeBlock({
       </pre>
     </div>
   );
+}
+
+function extractPlainText(node: ReactNode): string {
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(extractPlainText).join("");
+  if (isValidElement(node)) {
+    const props = node.props as { children?: ReactNode };
+    return extractPlainText(props.children);
+  }
+  return "";
 }

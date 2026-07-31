@@ -27,7 +27,7 @@ type FullscreenOverlayProps = {
  * Fullscreen overlay — wide modal shell for admin panels.
  *
  * Why not CenteredDialog: CenteredDialog is sized for forms (max-w-md).
- * Users/Models/Embed admin need stat tiles + tables/grids that need
+ * Users/Models/Roles admin need stat tiles + tables/grids that need
  * real width. We give them up to 6xl (~72rem) while keeping them
  * visually distinct from a full page (90vh max, backdrop, ESC).
  *

@@ -128,7 +128,10 @@ export function AppShell({
     <div className="flex h-dvh w-full max-w-[100vw] overflow-hidden bg-[var(--paper)] text-[var(--ink)]">
       <Sidebar
         activeSessionId={activeSessionId}
-        onSelectSession={(s) => router.push(`/chat/${s.id}`)}
+        onSelectSession={(s) => {
+          if (s.project_id) router.push(`/projects/${s.project_id}/chat/${s.id}`);
+          else router.push(`/chat/${s.id}`);
+        }}
         onNewChat={() => router.push("/new")}
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}

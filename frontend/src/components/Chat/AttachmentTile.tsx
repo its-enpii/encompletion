@@ -36,7 +36,7 @@ export function AttachmentTile({
   // itself. Same for the generic icon-only preview.
   const TEXT_CAP = 1200;
   const text = extractPreviewText(kind, att);
-  const textKinds: Kind["kind"][] = ["markdown", "code", "text", "pdf", "docx", "xlsx"];
+  const textKinds: Kind["kind"][] = ["markdown", "code", "text", "pdf", "docx", "xlsx", "pptx"];
   const canTruncate = textKinds.includes(kind.kind);
   const truncated = canTruncate && text.length > TEXT_CAP;
   const shownText = truncated && !expanded ? text.slice(0, TEXT_CAP) : text;
@@ -75,7 +75,7 @@ export function AttachmentTile({
             {shownText}
           </div>
         )}
-        {(kind.kind === "pdf" || kind.kind === "docx" || kind.kind === "xlsx") && (
+        {(kind.kind === "pdf" || kind.kind === "docx" || kind.kind === "xlsx" || kind.kind === "pptx") && (
           <div className="h-full w-full overflow-hidden p-2 font-mono text-[10px] leading-snug text-[var(--ink-2)]">
             {shownText || "_(no extractable text — binary only)_"}
           </div>
@@ -131,6 +131,7 @@ type Kind =
   | { kind: "pdf"; ext: string }
   | { kind: "docx"; ext: string }
   | { kind: "xlsx"; ext: string }
+  | { kind: "pptx"; ext: string }
   | { kind: "generic"; ext: string };
 
 const CODE_EXTS: Record<string, string> = {
@@ -172,6 +173,12 @@ function classify(att: PendingAtt): Kind {
   ) {
     return { kind: "xlsx", ext };
   }
+  if (
+    ext === "pptx" || ext === "ppt" ||
+    mt.includes("presentationml") || mt === "application/vnd.ms-powerpoint"
+  ) {
+    return { kind: "pptx", ext: ext || "pptx" };
+  }
 
   return { kind: "generic", ext };
 }
@@ -207,6 +214,7 @@ function badgeConfig(kind: Kind): { bg: string; fg: string; label: string } {
   if (kind.kind === "pdf") return { bg: "#FEE2E2", fg: "#B91C1C", label: "PDF" };
   if (kind.kind === "docx") return { bg: "#DBEAFE", fg: "#1D4ED8", label: "DOCX" };
   if (kind.kind === "xlsx") return { bg: "#DCFCE7", fg: "#15803D", label: kind.ext.slice(0, 4).toUpperCase() || "XLSX" };
+  if (kind.kind === "pptx") return { bg: "#FFEDD5", fg: "#C2410C", label: kind.ext.slice(0, 4).toUpperCase() || "PPTX" };
   // generic — show extension badge
   return { bg: "var(--paper-3)", fg: "var(--ink-3)", label: kind.ext.slice(0, 4).toUpperCase() || "FILE" };
 }
@@ -238,7 +246,7 @@ function extractPreviewText(kind: Kind, att: PendingAtt): string {
   // fallback below only kicks in for uploads where the server pipeline
   // didn't run (e.g. upload failed, content not populated).
   if (
-    kind.kind === "pdf" || kind.kind === "docx" || kind.kind === "xlsx" ||
+    kind.kind === "pdf" || kind.kind === "docx" || kind.kind === "xlsx" || kind.kind === "pptx" ||
     kind.kind === "markdown" || kind.kind === "code" || kind.kind === "text"
   ) {
     // If the server already gave us plain text (no data: prefix), use it

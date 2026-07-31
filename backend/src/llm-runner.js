@@ -28,8 +28,14 @@ import { hashArtifact } from "./artifact-detector.js";
 import { renderMemoryFactsBlock } from "./memory.js";
 import { renderRecalledContextBlock } from "./recalled.js";
 import { renderSessionSummaryBlock } from "./summarized.js";
-import { buildTodayContextBlock } from "./persona.js";
+import { buildTodayContextBlock } from "./today-context.js";
+import { buildXlsx, buildPdf, buildPptx, safeDocFileName } from "./document-writer.js";
 import db from "./db/index.js";
+import { promises as fsp } from "node:fs";
+import * as path from "node:path";
+import crypto from "node:crypto";
+
+const LLM_STREAM_TIMEOUT_MS = Math.max(30_000, Number(process.env.LLM_STREAM_TIMEOUT_MS) || 120_000);
 
 // Chat-web product (Claude/ChatGPT/Gemini style) — not a coding agent.
 // File tools exist only as a workspace for drafting multi-file artifacts.
@@ -46,13 +52,22 @@ EmitArtifact for short inline examples that only illustrate a sentence.
 When you EmitArtifact, do not also paste the full content as a fenced code
 block — describe what you published and let the panel show the body.
 
+When the user wants a real downloadable spreadsheet, PDF, or PowerPoint,
+use CreateDocument (format xlsx|pdf|pptx). Do not fake Office binaries as
+markdown. For PDF text: instruct the model to rewrite into a clean, professional report
+with natural headings, short sections, and flowing prose — never dump raw source
+markdown or pipe tables. Use "# Heading", "## Section", "- bullet" only as structure.
+Avoid fancy unicode; prefer plain ASCII.
+
 Workspace tools (Read/Write/Edit/Glob/Grep) are only for drafting multi-file
 artifacts inside the session workspace before publishing with EmitArtifact.
 Do not treat the workspace as a project repo to "build" or "run". Prefer
 EmitArtifact directly when a single file is enough.
 
 Skill_list / Skill_read: if a skill matches the request, list then read it
-and follow its procedure.
+and follow its procedure. For plans/roadmaps use skill "planning"; for PRDs
+or product specs use skill "prd". Diagrams: put mermaid in fenced
+\`\`\`mermaid blocks (chat and markdown artifacts render them).
 
 Web research:
 - WebSearch: open-ended questions, news, facts you may not know, "what's the
@@ -195,7 +210,8 @@ const TOOLS = [
       description:
         "Publish a deliverable to the chat artifact panel (preview, copy, " +
         "save, render). Use for complete files, UI snippets, configs, docs. " +
-        "Not for tiny one-liner examples that only illustrate prose.",
+        "Not for tiny one-liner examples that only illustrate prose. " +
+        "For real .xlsx/.pdf/.pptx downloads use CreateDocument instead.",
       parameters: {
         type: "object",
         properties: {
@@ -220,6 +236,70 @@ const TOOLS = [
           },
         },
         required: ["type", "title", "content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "CreateDocument",
+      description:
+        "Create a downloadable binary document (xlsx, text PDF, or pptx) " +
+        "and attach it to the chat as a file artifact. Prefer this over " +
+        "markdown tables/lists when the user asks for Excel, PDF, or PowerPoint. " +
+        'format MUST be exactly one of: "pdf", "xlsx", "pptx" (lowercase).',
+      parameters: {
+        type: "object",
+        properties: {
+          format: {
+            type: "string",
+            enum: ["xlsx", "pdf", "pptx"],
+            description: 'Exact lowercase: "pdf" | "xlsx" | "pptx".',
+          },
+          title: {
+            type: "string",
+            description: "File title / download name (without path).",
+          },
+          sheets: {
+            type: "array",
+            description: "Required for xlsx. Each sheet has name + rows (2D array).",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                rows: {
+                  type: "array",
+                  items: { type: "array", items: {} },
+                },
+              },
+              required: ["rows"],
+            },
+          },
+          text: {
+            type: "string",
+            description: "Required for pdf if lines omitted. Full body text.",
+          },
+          lines: {
+            type: "array",
+            items: { type: "string" },
+            description: "Optional for pdf: pre-split lines.",
+          },
+          slides: {
+            type: "array",
+            description:
+              "Required for pptx. Each slide: title, bullets (string array), optional notes.",
+            items: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                bullets: { type: "array", items: { type: "string" } },
+                body: { type: "string", description: "Alt to bullets: newline-separated text." },
+                notes: { type: "string" },
+              },
+            },
+          },
+        },
+        required: ["format", "title"],
       },
     },
   },
@@ -267,10 +347,7 @@ export function runLLM(prompt, opts = {}, onEvent) {
   // falls back to the hardcoded SYSTEM_PROMPT const so behavior for
   // uncustomized users is bit-for-bit identical to before.
   const systemPrompt = resolveSystemPrompt(opts.userId);
-  // Per-user memory facts appended below the persona/system block as a
-  // second <system> section. Embed-mode calls pass userId=null so the
-  // block is skipped automatically — platform user facts don't leak into
-  // a tenant's chatbot context. DB hiccup returns '' silently.
+  // Per-user memory facts appended below the system block. DB hiccup → ''.
   const memoryBlock = renderMemoryFactsBlock(opts.userId);
   // Per-project memory facts (Phase 5) — pre-resolved by the route
   // handler so the runner stays DB-free at chat time. Empty string
@@ -290,14 +367,9 @@ export function runLLM(prompt, opts = {}, onEvent) {
   // the IIFE still emits `init` and starts the round, so the user
   // sees no perceptible delay.
   const blocks = { recalled: "" };
-  // Order: persona → user facts → project facts → project instructions
-  // → recalled → session summary. Stable per-user prefix (persona +
-  // user facts), stable per-project middle (project facts +
-  // instructions), ephemeral tail (recall + summary). The recall
-  // block starts as '' and is filled in by the IIFE below after the
-  // async rag.query resolves. The IIFE waits for it before firing
-  // the chat-completions request. The session summary is synchronous
-  // (DB read) so it slots in immediately.
+  // Order: user facts → project facts → project instructions → recalled
+  // → session summary. Recall block starts empty; IIFE fills it before
+  // the first chat-completions request.
   const summaryBlock = opts.sessionId
     ? renderSessionSummaryBlock(opts.sessionId)
     : "";
@@ -334,6 +406,8 @@ export function runLLM(prompt, opts = {}, onEvent) {
 
   const proc = new EventEmitter();
   let aborted = false;
+  let activeController = null;
+  let activeTimer = null;
 
   proc.on("close", () => { /* server.js listens for this; no payload needed */ });
 
@@ -378,8 +452,10 @@ export function runLLM(prompt, opts = {}, onEvent) {
     const totals = { input_tokens: 0, output_tokens: 0 };
 
     try {
-      // No max rounds / turn deadline — ends when model stops tool-calling,
-      // client kills the run, or upstream errors. Runaway = operator kill.
+      // Cap tool rounds so a confused model (retry CreateDocument forever)
+      // cannot hang the run. Client kill still aborts earlier.
+      const MAX_TOOL_ROUNDS = Math.max(1, Number(process.env.LLM_MAX_TOOL_ROUNDS) || 12);
+      let toolRound = 0;
       while (true) {
         if (aborted) return emitResult({ is_error: false });
 
@@ -393,19 +469,24 @@ export function runLLM(prompt, opts = {}, onEvent) {
         // failing on a single over-budget second.
         let sse = null;
         for (let retry = 0; retry < 3; retry++) {
+          activeController = new AbortController();
+          activeTimer = setTimeout(() => activeController.abort(new Error("LLM upstream stream timeout")), LLM_STREAM_TIMEOUT_MS);
           sse = await fetchChatCompletion({
             model: modelName,
             messages,
             includeTools: toolsEnabled,
-            embedTools: opts.embedTools,
+            signal: activeController.signal,
           });
           if (sse.status !== 429) break;
+          clearTimeout(activeTimer);
           const waitMs = 800 * (retry + 1);
           try { await sse.text(); } catch {}
           onEvent({ type: "stderr", text: `LLM rate-limited (429), retrying in ${waitMs}ms\n` });
           await new Promise((r) => setTimeout(r, waitMs));
         }
         if (!sse.ok) {
+          clearTimeout(activeTimer);
+          activeController = null;
           const errBody = await sse.text().catch(() => "");
           // If tools caused the 400 and we haven't degraded yet, fall
           // back to text-only and inform the operator via stderr.
@@ -418,6 +499,8 @@ export function runLLM(prompt, opts = {}, onEvent) {
           return emitResult({ is_error: true, error: `LLM HTTP ${sse.status}` });
         }
         if (!sse.body) {
+          clearTimeout(activeTimer);
+          activeController = null;
           onEvent({ type: "stderr", text: "LLM response had no body\n" });
           return emitResult({ is_error: true, error: "empty response body" });
         }
@@ -471,17 +554,46 @@ export function runLLM(prompt, opts = {}, onEvent) {
                 }
                 if (Array.isArray(delta?.tool_calls)) {
                   for (const tc of delta.tool_calls) {
-                    if (tc.id) {
-                      let slot = toolCalls.find((t) => t.id === tc.id);
-                      if (!slot) {
-                        slot = { id: tc.id, name: tc.function?.name ?? "", arguments: "" };
-                        toolCalls.push(slot);
-                      }
-                      if (tc.function?.name) slot.name = tc.function.name;
-                      if (typeof tc.function?.arguments === "string") {
-                        slot.arguments += tc.function.arguments;
-                      }
+                    // OpenAI streams tool_calls by index: first chunk has
+                    // id+name, later chunks only {index, function:{arguments}}.
+                    // Matching only on tc.id drops every argument delta.
+                    let slot = null;
+                    if (tc.id) slot = toolCalls.find((t) => t.id === tc.id);
+                    if (!slot && typeof tc.index === "number") {
+                      slot = toolCalls.find((t) => t.index === tc.index);
                     }
+                    if (!slot) {
+                      slot = {
+                        id: tc.id || `call_${toolCalls.length}`,
+                        index: typeof tc.index === "number" ? tc.index : toolCalls.length,
+                        name: tc.function?.name ?? "",
+                        arguments: "",
+                      };
+                      toolCalls.push(slot);
+                    }
+                    if (tc.id) slot.id = tc.id;
+                    if (typeof tc.index === "number") slot.index = tc.index;
+                    if (tc.function?.name) slot.name = tc.function.name;
+                    const argPiece = tc.function?.arguments;
+                    if (typeof argPiece === "string") slot.arguments += argPiece;
+                    else if (argPiece && typeof argPiece === "object") {
+                      // Some gateways send the full object once.
+                      slot.arguments = JSON.stringify(argPiece);
+                    }
+                  }
+                }
+                // Non-delta tool_calls on the final message object (some
+                // gateways only put tools there, never in deltas).
+                const msgToolCalls = choice?.message?.tool_calls;
+                if (Array.isArray(msgToolCalls) && msgToolCalls.length && !toolCalls.length) {
+                  for (const tc of msgToolCalls) {
+                    const args = tc.function?.arguments;
+                    toolCalls.push({
+                      id: tc.id || `call_${toolCalls.length}`,
+                      index: typeof tc.index === "number" ? tc.index : toolCalls.length,
+                      name: tc.function?.name ?? "",
+                      arguments: typeof args === "string" ? args : JSON.stringify(args ?? {}),
+                    });
                   }
                 }
                 if (obj?.usage) usageThisRound = obj.usage;
@@ -498,7 +610,21 @@ export function runLLM(prompt, opts = {}, onEvent) {
                   assistantTextThisRound += content;
                   onEvent({ type: "text", text: content });
                   sawAny = true;
-                  // Cancel the read loop by jumping to the end.
+                }
+                const msgToolCalls = choice?.message?.tool_calls;
+                if (Array.isArray(msgToolCalls)) {
+                  for (const tc of msgToolCalls) {
+                    const args = tc.function?.arguments;
+                    toolCalls.push({
+                      id: tc.id || `call_${toolCalls.length}`,
+                      index: typeof tc.index === "number" ? tc.index : toolCalls.length,
+                      name: tc.function?.name ?? "",
+                      arguments: typeof args === "string" ? args : JSON.stringify(args ?? {}),
+                    });
+                    sawAny = true;
+                  }
+                }
+                if (content || (msgToolCalls && msgToolCalls.length)) {
                   try { await reader.cancel(); } catch { /* ignore */ }
                   break;
                 }
@@ -507,6 +633,8 @@ export function runLLM(prompt, opts = {}, onEvent) {
           }
         } finally {
           try { reader.releaseLock(); } catch { /* ignore */ }
+          clearTimeout(activeTimer);
+          activeController = null;
         }
 
         if (aborted) return emitResult({ is_error: false });
@@ -541,6 +669,19 @@ export function runLLM(prompt, opts = {}, onEvent) {
           return emitResult({ is_error: false });
         }
 
+        toolRound += 1;
+        if (toolRound > MAX_TOOL_ROUNDS) {
+          onEvent({
+            type: "stderr",
+            text: `tool loop capped at ${MAX_TOOL_ROUNDS} rounds — stopping\n`,
+          });
+          onEvent({
+            type: "text",
+            text: `\n\n(Berhenti: terlalu banyak langkah tool berulang. Coba minta ulang dengan instruksi lebih spesifik.)`,
+          });
+          return emitResult({ is_error: false });
+        }
+
         // Each tool call gets executed locally and appended to the
         // transcript as a 'tool' role message so the model can react.
         for (const tc of toolCalls) {
@@ -557,51 +698,26 @@ export function runLLM(prompt, opts = {}, onEvent) {
           }
           onEvent({ type: "tool_use", id: tc.id, name: tc.name, input: args });
           let r;
-          // Skill_* and EmitArtifact are routed separately — they
-          // don't touch the filesystem or run a deadline-bound process.
+          // Skill_*, EmitArtifact, CreateDocument are routed separately.
           if (tc.name === "Skill_list" || tc.name === "Skill_read") {
             r = await runSkillTool(tc.name, args, { disabled: disabledSkills });
           } else if (tc.name === "EmitArtifact") {
-            // Embed mode gating: tenants with allow_artifact_generation=0
-            // can't create artifacts. Refusing here (instead of silently
-            // no-op'ing) gives the model a chance to revise its plan.
-            if (opts.embedDispatch && opts.capability && opts.capability.allow_artifact_generation === false) {
-              r = { error: "artifact generation is disabled for this tenant" };
-              onEvent({ type: "stderr", text: `[embed] blocked EmitArtifact (allow_artifact_generation=0)\n` });
-            } else {
-              r = runEmitArtifact(args, onEvent);
+            r = runEmitArtifact(args, onEvent);
+          } else if (tc.name === "CreateDocument") {
+            // Operator log only — don't use stderr (FE surfaces stderr as error banner).
+            process.stderr.write(
+              `[CreateDocument] raw_args=${JSON.stringify(tc.arguments || "").slice(0, 300)} parsed=${JSON.stringify(args).slice(0, 300)}\n`
+            );
+            r = await runCreateDocument(args, onEvent, { cwd, sessionId: opts.sessionId });
+            if (r?.error) {
+              process.stderr.write(`[CreateDocument] failed: ${r.error}\n`);
             }
-          } else if (typeof opts.embedDispatch === "function" && opts.embedTools?.some((t) => t.function?.name === tc.name)) {
-            // Embed-mode tool (Kategori B): caller provides a dispatcher
-            // that knows how to invoke the tool. We pass through args
-            // plus a context object so the caller can write audit rows
-            // with the message id.
-            r = await opts.embedDispatch(tc.name, args, {
-              tenant_id: opts.tenantId,
-              external_user_id: opts.externalUserId,
-              session_id: opts.sessionId,
-            });
           } else if (tc.name === "Bash") {
-            // Product is chat-web, not a coding agent. Bash is never on the
-            // platform tool list; reject if the model invents the name or an
-            // old client still requests it. Embed tenants may only run Bash
-            // when capability.allow_bash is explicitly true (admin opt-in).
-            const embedBashOk = !!(opts.embedDispatch && opts.capability && opts.capability.allow_bash);
-            if (!embedBashOk) {
-              r = { error: "bash is disabled (chat product, not a coding agent)" };
-              onEvent({ type: "stderr", text: `[tools] blocked Bash\n` });
-            } else {
-              r = await runTool(tc.name, args, {
-                cwd,
-                // Even with allow_bash, embed must not phone home.
-                noNetworkEgress: true,
-              });
-            }
+            // Chat product, not coding agent — Bash never on tool list.
+            r = { error: "bash is disabled (chat product, not a coding agent)" };
+            onEvent({ type: "stderr", text: `[tools] blocked Bash\n` });
           } else {
-            r = await runTool(tc.name, args, {
-              cwd,
-              noNetworkEgress: !!opts.embedDispatch,
-            });
+            r = await runTool(tc.name, args, { cwd });
           }
           const content = r.error
             ? { error: r.error }
@@ -634,7 +750,7 @@ export function runLLM(prompt, opts = {}, onEvent) {
   })();
 
   return {
-    kill: () => { aborted = true; },
+    kill: () => { aborted = true; activeController?.abort(new Error("run stopped")); },
     proc,
   };
 }
@@ -671,10 +787,6 @@ function runEmitArtifact(args, emit) {
     return { error: "artifact too large (>256KB); chunk or save to disk via Write instead" };
   }
   const contentHash = hashArtifact(type, content);
-  // Re-emit through the same channel as fence-detected artifacts so
-  // server.js' existing handler at evt.type === 'tool_artifact' runs
-  // the same dedup + INSERT + socket emit path. The frontend sees an
-  // identical 'artifact' event either way.
   emit({ type: "tool_artifact", artifact: {
     type,
     language,
@@ -686,7 +798,169 @@ function runEmitArtifact(args, emit) {
   return { text: `emitted artifact "${title}" (${type}, ${content.length} bytes)` };
 }
 
-async function fetchChatCompletion({ model, messages, includeTools = true, embedTools }) {
+async function runCreateDocument(rawArgs, emit, { cwd, sessionId } = {}) {
+  // Unwrap common nesting mistakes: { parameters: {...} }, { input: {...} },
+  // or a JSON string body.
+  let args = rawArgs && typeof rawArgs === "object" ? rawArgs : {};
+  if (typeof rawArgs === "string") {
+    try { args = JSON.parse(rawArgs); } catch { args = {}; }
+  }
+  if (args.parameters && typeof args.parameters === "object") args = { ...args.parameters, ...args };
+  if (args.input && typeof args.input === "object" && !args.format && !args.text && !args.sheets) {
+    args = { ...args.input, ...args };
+  }
+  if (args.arguments && typeof args.arguments === "object") {
+    args = { ...args.arguments, ...args };
+  }
+
+  // Models often send "PDF", "Pdf", "application/pdf", or bury the type in
+  // the title ("report.pdf"). Normalize aggressively so a single wrong case
+  // doesn't kick off a retry loop.
+  function resolveFormat(raw, titleHint) {
+    const s = String(raw ?? "").trim().toLowerCase();
+    if (!s && !titleHint) return null;
+    if (s === "pdf" || s === "application/pdf" || s.endsWith("/pdf")) return "pdf";
+    if (s === "xlsx" || s === "xls" || s === "excel" || s === "spreadsheet"
+      || s.includes("spreadsheetml") || s === "application/vnd.ms-excel") return "xlsx";
+    if (s === "pptx" || s === "ppt" || s === "powerpoint" || s === "presentation"
+      || s.includes("presentationml")) return "pptx";
+    const t = String(titleHint ?? "").trim().toLowerCase();
+    if (t.endsWith(".pdf")) return "pdf";
+    if (t.endsWith(".xlsx") || t.endsWith(".xls")) return "xlsx";
+    if (t.endsWith(".pptx") || t.endsWith(".ppt")) return "pptx";
+    if (/\bpdf\b/.test(s) || /\bpdf\b/.test(t)) return "pdf";
+    if (/\b(xlsx|excel)\b/.test(s) || /\b(xlsx|excel)\b/.test(t)) return "xlsx";
+    if (/\b(pptx|powerpoint)\b/.test(s) || /\b(pptx|powerpoint)\b/.test(t)) return "pptx";
+    return null;
+  }
+  const titleRaw = typeof args.title === "string" ? args.title
+    : typeof args.name === "string" ? args.name
+    : typeof args.filename === "string" ? args.filename
+    : typeof args.file_name === "string" ? args.file_name
+    : "";
+
+  function inferFromPayload(a) {
+    if (Array.isArray(a?.sheets) && a.sheets.length) return "xlsx";
+    if (Array.isArray(a?.slides) && a.slides.length) return "pptx";
+    if (typeof a?.text === "string" && a.text.trim()) return "pdf";
+    if (Array.isArray(a?.lines) && a.lines.length) return "pdf";
+    if (typeof a?.content === "string" && a.content.trim()) return "pdf";
+    if (typeof a?.body === "string" && a.body.trim()) return "pdf";
+    if (typeof a?.markdown === "string" && a.markdown.trim()) return "pdf";
+    return null;
+  }
+
+  // Default: if still unknown but title/name suggests a doc, assume pdf.
+  // Empty body will still fail with a clear "needs text" error below.
+  const format = resolveFormat(args.format, titleRaw)
+    || resolveFormat(args.type, titleRaw)
+    || resolveFormat(args.file_type, titleRaw)
+    || resolveFormat(args.kind, titleRaw)
+    || resolveFormat(args.output, titleRaw)
+    || inferFromPayload(args)
+    || (titleRaw ? "pdf" : null);
+
+  if (!format) {
+    return {
+      error:
+        'CreateDocument needs format + body. Example: '
+        + '{"format":"pdf","title":"Guide","text":"...full document text..."}. '
+        + 'For excel use sheets; for pptx use slides. Do not call with empty args.',
+    };
+  }
+  const title = titleRaw.trim()
+    ? titleRaw.trim().slice(0, 80)
+    : (format === "xlsx" ? "spreadsheet" : format === "pptx" ? "presentation" : "document");
+
+  // Accept common aliases models invent for body content.
+  const pdfText = typeof args.text === "string" ? args.text
+    : typeof args.content === "string" ? args.content
+    : typeof args.body === "string" ? args.body
+    : typeof args.markdown === "string" ? args.markdown
+    : typeof args.html === "string" ? args.html
+    : undefined;
+  const pdfLines = Array.isArray(args.lines) ? args.lines
+    : Array.isArray(args.paragraphs) ? args.paragraphs
+    : Array.isArray(args.sections) ? args.sections.map((s) =>
+        typeof s === "string" ? s : [s?.title, s?.text, s?.body].filter(Boolean).join("\n")
+      )
+    : undefined;
+
+  let buf;
+  try {
+    if (format === "xlsx") {
+      if (!Array.isArray(args.sheets) || !args.sheets.length) {
+        return { error: 'xlsx requires sheets: [{ name, rows: [[...]] }]' };
+      }
+      buf = buildXlsx({ sheets: args.sheets });
+    } else if (format === "pptx") {
+      if (!Array.isArray(args.slides) || !args.slides.length) {
+        return { error: 'pptx requires slides: [{ title, bullets }]' };
+      }
+      buf = await buildPptx({ title, slides: args.slides });
+    } else {
+      if (!pdfText && (!pdfLines || !pdfLines.length)) {
+        return { error: 'pdf requires text or lines (non-empty body)' };
+      }
+      buf = await buildPdf({ title, text: pdfText, lines: pdfLines });
+    }
+  } catch (e) {
+    return { error: e?.message || String(e) };
+  }
+  if (!buf || !Buffer.isBuffer(buf) || buf.length === 0) {
+    return { error: "empty document" };
+  }
+  if (buf.length > 20 * 1024 * 1024) {
+    return { error: "document too large (>20MB)" };
+  }
+
+  const storageRoot = process.env.STORAGE_PATH
+    ? path.resolve(process.cwd(), process.env.STORAGE_PATH)
+    : path.resolve(process.cwd(), "storage/attachments");
+  const docsDir = path.join(storageRoot, "docs", String(sessionId || "anon"));
+  await fsp.mkdir(docsDir, { recursive: true });
+  const fileName = safeDocFileName(title, format);
+  const unique = `${Date.now()}-${crypto.randomBytes(4).toString("hex")}-${fileName}`;
+  const abs = path.join(docsDir, unique);
+  await fsp.writeFile(abs, buf);
+
+  // Also drop a copy in session workdir when available so Read/Glob can see it.
+  if (cwd) {
+    try {
+      await fsp.writeFile(path.join(cwd, fileName), buf);
+    } catch { /* ignore workdir copy failures */ }
+  }
+
+  const mime =
+    format === "xlsx"
+      ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      : format === "pptx"
+        ? "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        : "application/pdf";
+  const rel = path.relative(storageRoot, abs).split(path.sep).join("/");
+  const contentHash = hashArtifact("file", rel + "|" + buf.length);
+  const preview =
+    format === "xlsx" ? `Excel workbook (${buf.length} bytes)`
+    : format === "pptx" ? `PowerPoint deck (${buf.length} bytes)`
+    : `PDF document (${buf.length} bytes)`;
+
+  emit({ type: "tool_artifact", artifact: {
+    type: "file",
+    language: format,
+    title: fileName,
+    content: preview,
+    content_hash: contentHash,
+    file_path: rel,
+    mime_type: mime,
+    file_size: buf.length,
+    source: "tool",
+  } });
+  return {
+    text: `created ${format.toUpperCase()} "${fileName}" (${buf.length} bytes). User can download from the artifact card.`,
+  };
+}
+
+async function fetchChatCompletion({ model, messages, includeTools = true, signal }) {
   const baseUrl = (process.env.LLM_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
   const apiKey = process.env.LLM_API_KEY || "";
   const url = `${baseUrl}/chat/completions`;
@@ -697,17 +971,7 @@ async function fetchChatCompletion({ model, messages, includeTools = true, embed
     temperature: 0.2,
   };
   if (includeTools) {
-    // Embed mode passes embedTools — Kategori B tools registered for
-    // the tenant. Format matches the static TOOLS array (OpenAI
-    // function-calling shape: { type: 'function', function: { name,
-    // description, parameters } }). Skill tools still apply globally;
-    // we never replace them. embedTools is destructured from the args
-    // (not read from `opts` like the rest of runLLM) because this
-    // function is module-scope and `opts` isn't in scope here.
-    const staticTools = Array.isArray(embedTools) && embedTools.length > 0
-      ? embedTools
-      : TOOLS;
-    body.tools = [...staticTools, ...skillTools];
+    body.tools = [...TOOLS, ...skillTools];
     body.tool_choice = "auto";
   }
   return fetch(url, {
@@ -717,6 +981,7 @@ async function fetchChatCompletion({ model, messages, includeTools = true, embed
       Authorization: apiKey ? `Bearer ${apiKey}` : "",
     },
     body: JSON.stringify(body),
+    signal,
   });
 }
 

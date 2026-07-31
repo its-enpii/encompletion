@@ -21,6 +21,8 @@ const TYPE_META: Record<string, { label: string; color: string; bg: string; icon
   svg:       { label: "SVG",   color: "#8B5CF6",             bg: "rgba(139,92,246,0.10)", icon: <SvgGlyph /> },
   markdown:  { label: "MD",    color: "var(--ink-2)",         bg: "var(--paper-2)",       icon: <MdGlyph /> },
   code:      { label: "Code",  color: "var(--ink-2)",         bg: "var(--paper-2)",       icon: <CodeGlyph /> },
+  csv:       { label: "CSV",   color: "#16A34A",             bg: "rgba(22,163,74,0.10)", icon: <CodeGlyph /> },
+  file:      { label: "File",  color: "var(--magenta-700)",  bg: "var(--magenta-50)",    icon: <FileGlyph /> },
 };
 
 /**
@@ -64,7 +66,11 @@ export function ArtifactCard({ artifact, onOpen }: Props) {
           </div>
         </div>
         <span className="flex shrink-0 items-center gap-1.5">
-          <span className="text-[10px] text-[var(--ink-3)]">{artifact.line_count} baris</span>
+          <span className="text-[10px] text-[var(--ink-3)]">
+            {artifact.type === "file"
+              ? (artifact.language ? artifact.language.toUpperCase() : "file")
+              : `${artifact.line_count} baris`}
+          </span>
           <span
             className={`grid h-7 w-7 place-items-center rounded-[var(--r-sm)] text-[var(--ink-2)] transition-all ${
               hovered ? "bg-[var(--magenta-50)] text-[var(--magenta-700)]" : "bg-[var(--paper-2)]"
@@ -120,6 +126,14 @@ function MdGlyph() {
       <rect x="2" y="6" width="20" height="12" rx="2" />
       <path d="M6 16V10l2 2 2-2v6" />
       <path d="M14 10v6m0 0l-2-2m2 2l2-2" />
+    </svg>
+  );
+}
+function FileGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
     </svg>
   );
 }

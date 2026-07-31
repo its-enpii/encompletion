@@ -12,7 +12,7 @@
  *  4. User with auto_memory_enabled=0 → skipped even if idle
  *  5. Only user-side (no assistant turn) → skipped
  *  6. After extraction, second run on same idle window is no-op
- *  7. Embed session (owner_type='tenant') → skipped (not platform user's)
+ *  7. start/stop worker are idempotent
  *  8. User with no user_settings row → defaults to ON
  *
  * Run: node --test src/extractor-worker.test.js
@@ -49,7 +49,7 @@ function seedUser(name) {
   return Number(id);
 }
 
-function seedSession({ userId, ageMs, lastExtractedAt = null, ownerType = "user" }) {
+function seedSession({ userId, ageMs, lastExtractedAt = null }) {
   // Make a session with `id` we control + per-test updated_at / last_memory_extracted_at.
   // IMPORTANT: use SQLite's `YYYY-MM-DD HH:MM:SS` format. ISO 8601 with
   // 'T' and 'Z' won't compare against `datetime('now', '-300 seconds')`
@@ -63,14 +63,12 @@ function seedSession({ userId, ageMs, lastExtractedAt = null, ownerType = "user"
   const extractedAt = lastExtractedAt != null ? fmt(lastExtractedAt) : null;
   const info = db
     .prepare(
-      `INSERT INTO sessions (title, model, user_id, owner_type, owner_id, updated_at, last_memory_extracted_at)
-       VALUES (?, 'workspace', ?, ?, ?, ?, ?)`
+      `INSERT INTO sessions (title, model, user_id, updated_at, last_memory_extracted_at)
+       VALUES (?, 'workspace', ?, ?, ?)`
     )
     .run(
       `sess-${crypto.randomBytes(3).toString("hex")}`,
       userId,
-      ownerType,
-      String(userId),
       updatedAt,
       extractedAt
     );
@@ -210,19 +208,6 @@ test("after extraction, second run on same idle window is no-op", async () => {
   // (we just bumped it), so the WHERE clause excludes this session.
   await runOnce();
   assert.equal(listFacts(aliceId).length, 1, "still 1, no double-write");
-});
-
-test("embed session (owner_type='tenant') → skipped (not platform user)", async () => {
-  const sid = seedSession({
-    userId: aliceId,            // user id still points to alice (embed sessions have owner_id set to tenant uuid in real usage; here we keep it simple)
-    ageMs: 10 * 60_000,
-    ownerType: "tenant",
-  });
-  seedMessage(sid, "user", "Saya tinggal di Bandung");
-  seedMessage(sid, "assistant", "OK");
-  _setExtractorLLMForTests(async () => JSON.stringify({ facts: [{ key: "lokasi", value: "Bandung" }] }));
-  await runOnce();
-  assert.equal(listFacts(aliceId).length, 0, "embed session ignored");
 });
 
 test("startExtractorWorker / stopExtractorWorker are idempotent", () => {

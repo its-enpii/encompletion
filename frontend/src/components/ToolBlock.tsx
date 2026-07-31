@@ -23,6 +23,10 @@ const ICONS: Record<string, string> = {
   Grep: "🔍",
   WebSearch: "🌐",
   WebFetch: "🌐",
+  EmitArtifact: "◇",
+  CreateDocument: "📄",
+  Skill_list: "✦",
+  Skill_read: "✦",
   PowerShell: "💻",
   Task: "🤖",
 };
@@ -65,9 +69,24 @@ export default function ToolBlock({ tool }: { tool: ToolUse }) {
               $ {String((input as any).command).slice(0, 80)}
             </code>
           )}
+          {input && typeof input === "object" && "path" in input && !( "file_path" in input) && (
+            <code className="truncate rounded bg-[var(--paper-2)] px-2 py-0.5 font-mono text-xs text-[var(--ink-2)]">
+              {String((input as any).path)}
+            </code>
+          )}
           {input && typeof input === "object" && "file_path" in input && (
             <code className="truncate rounded bg-[var(--paper-2)] px-2 py-0.5 font-mono text-xs text-[var(--ink-2)]">
               {String((input as any).file_path)}
+            </code>
+          )}
+          {input && typeof input === "object" && "title" in input && (
+            <code className="truncate rounded bg-[var(--paper-2)] px-2 py-0.5 font-mono text-xs text-[var(--ink-2)]">
+              {String((input as any).format ? `${(input as any).format}: ` : "")}{String((input as any).title).slice(0, 60)}
+            </code>
+          )}
+          {input && typeof input === "object" && "name" in input && tool.tool_name.startsWith("Skill") && (
+            <code className="truncate rounded bg-[var(--paper-2)] px-2 py-0.5 font-mono text-xs text-[var(--ink-2)]">
+              {String((input as any).name)}
             </code>
           )}
         </div>

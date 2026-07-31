@@ -15,8 +15,7 @@
  * Opt-out: per-user auto_memory_enabled setting on user_settings; default
  * is ON, but users can disable from the Memory dialog.
  *
- * Embed sessions: scoped to owner_type='user' so platform user chat only.
- * Tenant widget sessions live under owner_type='tenant' and never feed
+ * Scope: sessions with a real user_id.
  * the platform user's memory facts.
  */
 
@@ -55,9 +54,7 @@ export function stopExtractorWorker() {
 
 export async function runOnce() {
   // Sessions: idle for at least IDLE_THRESHOLD_MS AND not yet extracted
-  // since their last user activity. The platform-side filter
-  // (owner_type='user') keeps embed/tenant sessions out of the user's
-  // personal memory.
+  // since their last user activity.
   const idleSeconds = Math.max(1, Math.floor(IDLE_THRESHOLD_MS / 1000));
   const sessions = db
     .prepare(
@@ -66,7 +63,7 @@ export async function runOnce() {
         WHERE datetime(updated_at) < datetime('now', ?)
           AND (last_memory_extracted_at IS NULL
                OR datetime(last_memory_extracted_at) < datetime(updated_at))
-          AND owner_type = 'user'`
+          AND user_id IS NOT NULL`
     )
     .all(`-${idleSeconds} seconds`);
 

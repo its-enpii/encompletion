@@ -5,35 +5,21 @@ import { usePathname } from "next/navigation";
 import { UsersDialog } from "./UsersDialog";
 import { ModelsDialog } from "./ModelsDialog";
 import { RolesDialog } from "./RolesDialog";
-import { EmbedAdminDialog } from "./EmbedAdminDialog";
-import { ApiKeysDialog } from "./ApiKeysDialog";
 import { SystemPromptDialog } from "./SystemPromptDialog";
 import { MemoryDialog } from "./MemoryDialog";
 
 /**
  * AdminPanelHost — owns the currently-open admin dialog and dispatches
- * the appropriate overlay. Mounted exactly once in AppShell so any
- * "admin:open-*" event from anywhere in the tree opens the same
- * dialog (no duplicate state).
+ * the appropriate overlay. Mounted exactly once in AppShell.
  *
- * Dialog kinds: 'users' | 'roles' | 'models' | 'embed' | 'api-keys' | 'prompt' | 'memory'.
- * A null state means no dialog is open; rendering is a no-op so
- * presence of the host in the tree doesn't affect performance.
- *
- * Auto-close on pathname change: when the user navigates (e.g. via the
- * New Chat button in the sidebar) the dialog closes so the new route's
- * content isn't covered by a stale modal. We compare pathname in an
- * effect, NOT on every render — opening a dialog doesn't change
- * pathname, so the dialog stays open across renders.
+ * Dialog kinds: 'users' | 'roles' | 'models' | 'prompt' | 'memory'.
  */
-type DialogKind = "users" | "roles" | "models" | "embed" | "api-keys" | "prompt" | "memory" | null;
+type DialogKind = "users" | "roles" | "models" | "prompt" | "memory" | null;
 
 const KIND_EVENT: Record<Exclude<DialogKind, null>, string> = {
   users: "admin:open-users",
   roles: "admin:open-roles",
   models: "admin:open-models",
-  embed: "admin:open-embed",
-  "api-keys": "admin:open-api-keys",
   prompt: "admin:open-prompt",
   memory: "admin:open-memory",
 };
@@ -50,8 +36,6 @@ export function AdminPanelHost() {
       users: open("users"),
       roles: open("roles"),
       models: open("models"),
-      embed: open("embed"),
-      "api-keys": open("api-keys"),
       prompt: open("prompt"),
       memory: open("memory"),
     };
@@ -65,13 +49,8 @@ export function AdminPanelHost() {
     };
   }, []);
 
-  // Auto-close when route changes. Excludes the initial render where
-  // pathname hasn't settled yet (would close a freshly-opened dialog).
   useEffect(() => {
     setOpen(null);
-    // We intentionally don't depend on `open` — the effect runs whenever
-    // pathname changes, which is exactly when we want to dismiss any
-    // open overlay.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
@@ -82,8 +61,6 @@ export function AdminPanelHost() {
       <UsersDialog open={open === "users"} onClose={close} />
       <RolesDialog open={open === "roles"} onClose={close} />
       <ModelsDialog open={open === "models"} onClose={close} />
-      <EmbedAdminDialog open={open === "embed"} onClose={close} />
-      <ApiKeysDialog open={open === "api-keys"} onClose={close} />
       <SystemPromptDialog open={open === "prompt"} onClose={close} />
       <MemoryDialog open={open === "memory"} onClose={close} />
     </>

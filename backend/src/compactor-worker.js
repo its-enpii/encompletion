@@ -13,7 +13,7 @@
  * Idempotency: last_compacted_at bumped after run. Worker skips when
  * updated_at hasn't moved past last_compacted_at.
  *
- * Opt-out: none at v1. Embed/tenant sessions excluded via owner_type.
+ * Opt-out: none at v1.
  *
  * Cost: BATCH_MAX sessions per tick + Haiku-class model env override.
  */
@@ -50,14 +50,13 @@ export function stopCompactorWorker() {
 
 export async function runOnce() {
   // Sessions with enough messages to need compaction, that have changed
-  // since last compaction. owner_type filter keeps embed/tenant
-  // sessions out of the platform user's compaction pipeline.
+  // since last compaction.
   const candidates = db
     .prepare(
       `SELECT s.id AS session_id, s.user_id
          FROM sessions s
         WHERE s.archived_at IS NULL
-          AND s.owner_type = 'user'
+          AND s.user_id IS NOT NULL
           AND (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) > ?
           AND (s.last_compacted_at IS NULL
                OR datetime(s.last_compacted_at) < datetime(s.updated_at))

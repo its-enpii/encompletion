@@ -52,12 +52,16 @@ export default function Chat({
     errorIdRef.current = showError({ message, detail });
   }
 
-  const routeSessionId =
-    pathname?.startsWith("/chat/") && params?.id && /^\d+$/.test(params.id)
+  // /chat/:id OR /projects/:pid/chat/:sessionId
+  const projectChatMatch = pathname?.match(/^\/projects\/(\d+)\/chat\/(\d+)/);
+  const routeSessionId = projectChatMatch
+    ? Number(projectChatMatch[2])
+    : pathname?.startsWith("/chat/") && params?.id && /^\d+$/.test(params.id)
       ? Number(params.id)
       : null;
-  const routeProjectId =
-    pathname?.startsWith("/projects/") && params?.id && /^\d+$/.test(params.id)
+  const routeProjectId = projectChatMatch
+    ? Number(projectChatMatch[1])
+    : pathname?.startsWith("/projects/") && params?.id && /^\d+$/.test(params.id)
       ? Number(params.id)
       : null;
 
@@ -326,7 +330,9 @@ export default function Chat({
           language: art.language ?? null,
           title: art.title ?? null,
           content_preview: (art.content || "").slice(0, 220),
-          line_count: (art.content || "").split("\n").length,
+          line_count: art.file_size
+            ? Math.max(1, Math.round(Number(art.file_size) / 80))
+            : (art.content || "").split("\n").length,
           version: art.version ?? 1,
         });
       }
@@ -578,6 +584,8 @@ export default function Chat({
       },
       text: (payload: { sessionId: number; text: string }) => {
         if (!isMine(payload)) return;
+        setLastTickAt(Date.now());
+        setStale(false);
         setMessages((cur) => {
           const last = cur[cur.length - 1];
           // Only append onto an in-flight assistant (id <= 0). A finished
@@ -593,16 +601,17 @@ export default function Chat({
       },
       stderr: (payload: { sessionId?: number; text: string }) => {
         if (!isMine(payload)) return;
-        if (!errorIdRef.current) {
-          errorIdRef.current = showError({ message: payload.text.slice(0, 240) });
+        setLastTickAt(Date.now());
+        setStale(false);
+        const text = payload.text || "";
+        // Only surface real failures. Debug/operator lines (CreateDocument
+        // args, tool loop notes) must not become red banners mid-run.
+        const isHardFail = /^LLM HTTP\s+\d{3}/.test(text)
+          || /empty stream|LLM loop failed|tool loop capped/i.test(text);
+        if (isHardFail && !errorIdRef.current) {
+          errorIdRef.current = showError({ message: text.slice(0, 240) });
         }
-        // Some LLM failures only surface through stderr (e.g. "LLM HTTP
-        // 504: …") followed by a result event. The result event fires
-        // shortly after and also clears streaming, so this is mostly
-        // belt-and-braces — but on the path where the result is delayed
-        // or dropped, this stops TypingPill sticking around once the
-        // user has already seen the error.
-        if (/^LLM HTTP\s+\d{3}/.test(payload.text || "")) {
+        if (/^LLM HTTP\s+\d{3}/.test(text)) {
           setStreaming(false);
         }
       },
@@ -638,29 +647,72 @@ export default function Chat({
       },
       tool_use: (payload: any) => {
         if (!isMine(payload)) return;
+        setLastTickAt(Date.now());
+        setStale(false);
         const tool = payload.tool ?? payload;
-        setToolUses((cur) => [...cur, tool as ToolUse]);
+        // Normalize flat SSE shape → ToolUse for ToolBlock.
+        const normalized = {
+          id: tool.id ?? 0,
+          message_id: tool.message_id ?? 0,
+          tool_use_id: tool.tool_use_id ?? tool.id,
+          tool_name: tool.tool_name ?? tool.name ?? "tool",
+          input: typeof tool.input === "string" ? tool.input : JSON.stringify(tool.input ?? null),
+          output: tool.output ?? null,
+          is_error: tool.is_error ? 1 : 0,
+          duration_ms: tool.duration_ms ?? null,
+        };
+        setToolUses((cur) => [...cur, normalized as ToolUse]);
+        setInfo(`Tool: ${normalized.tool_name}…`);
+      },
+      tool_result: (payload: any) => {
+        if (!isMine(payload)) return;
+        setLastTickAt(Date.now());
+        setStale(false);
+        const id = payload.tool_use_id ?? payload.id;
+        setToolUses((cur) =>
+          cur.map((t) =>
+            (t.tool_use_id && t.tool_use_id === id) || t.id === id
+              ? {
+                  ...t,
+                  output: typeof payload.content === "string"
+                    ? payload.content
+                    : JSON.stringify(payload.content ?? null),
+                  is_error: payload.is_error ? 1 : 0,
+                }
+              : t
+          )
+        );
       },
       artifact: (payload: any) => {
         if (!isMine(payload)) return;
+        setLastTickAt(Date.now());
+        setStale(false);
         const art = payload.artifact ?? payload;
-        setArtifacts((cur) => [...cur, art as Artifact]);
-        const targetMsgId = (payload.artifactId ?? art?.message_id) ?? null;
+        setArtifacts((cur) => {
+          if (art?.id != null && cur.some((x) => x.id === art.id)) return cur;
+          return [...cur, art as Artifact];
+        });
+        // Open side panel so user sees the deliverable.
+        setShowArtifactPanel(true);
+        // Prefer message_id from payload/art; never treat artifact id as msg key.
+        const targetMsgId = payload.message_id ?? art?.message_id ?? null;
         setArtifactsByMsg((cur) => {
           const next = { ...cur };
           const key = targetMsgId != null
             ? targetMsgId
             : messagesRef.current.findLast?.((m) => m.role === "assistant")?.id
               ?? messagesRef.current[messagesRef.current.length - 1]?.id
-              ?? 0;
-          if (!key) return cur;
+              ?? null;
+          if (key == null) return cur;
           const entry = {
             id: art.id,
             type: art.type,
             language: art.language ?? null,
             title: art.title ?? null,
             content_preview: (art.content || "").slice(0, 220),
-            line_count: (art.content || "").split("\n").length,
+            line_count: art.file_size
+              ? Math.max(1, Math.round(Number(art.file_size) / 80))
+              : (art.content || "").split("\n").length,
             version: art.version ?? 1,
           };
           next[key] = [...(next[key] || []).filter((x) => x.id !== entry.id), entry];
@@ -773,7 +825,6 @@ export default function Chat({
           try { window.sessionStorage.removeItem(`app:active-run:${sessionId}`); } catch {}
         }
       },
-      tool_result: () => { /* no-op */ },
       artifact_dup: () => { /* dedupe marker; not rendered */ },
       artifact_rejections: () => { /* noise-reduction summary; not surfaced */ },
       onError: () => {
@@ -1090,10 +1141,7 @@ export default function Chat({
       .map((m) => ({ value: m.key, label: m.label }));
     if (fromRegistry.length > 0) return fromRegistry;
     // Last-resort fallback when the registry endpoint is unreachable AND
-    // not loading. Keys here MUST be ids the engine CLI accepts; using
-    // a generic placeholder like 'standard' or 'fast' would cause every
-    // prompt to be rejected upstream with "issue with the selected
-    // model", which the user perceives as a stuck UI.
+    // not loading. Keys must be valid provider model ids.
     return registryLoading
       ? [{ value: "workspace", label: "Workspace" }]
       : [
@@ -1104,8 +1152,8 @@ export default function Chat({
   }, [registryModels, registryLoading]);
 
   // If the persisted/default model disappears from the registry (admin
-  // disabled it), snap back to the first enabled entry so the next message
-  // doesn't send an unknown --model flag to the CLI.
+  // disabled it), snap back to the first enabled entry so the next
+  // message doesn't send an unknown model id to the provider.
   useEffect(() => {
     if (modelOptions.length === 0) return;
     if (!modelOptions.some((o) => o.value === model)) {
@@ -1131,11 +1179,15 @@ export default function Chat({
     }
     if (!lastUser) return;
 
-    // Optimistically remove the old assistant message + any tool_uses tied to
-    // it. The server has already deleted them; this keeps the UI in sync.
+    // Optimistically remove old assistant + tools + artifacts for this turn.
     setMessages((cur) => cur.filter((m) => m.id !== assistantMsgId));
     setToolUses((cur) => cur.filter((t) => t.message_id !== assistantMsgId));
-    setArtifacts((cur) => cur.filter((_a) => true)); // server may also drop these; safety
+    setArtifacts((cur) => cur.filter((a) => a.message_id !== assistantMsgId));
+    setArtifactsByMsg((cur) => {
+      const next = { ...cur };
+      delete next[assistantMsgId];
+      return next;
+    });
 
     setUsage(null);
     setStreaming(true);
@@ -1161,11 +1213,8 @@ export default function Chat({
   }
 
   // The composable chat area.
-  const chatArea = (
+  const chatColumn = (
     <div
-      // min-h-0 + overflow-hidden: only MessageList scrolls. Without min-h-0,
-      // flex-1 children grow past the dvh shell and the whole page scrolls
-      // (composer slips under the mobile Chrome address bar).
       className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[var(--paper)]"
       onDragEnter={(e) => {
         if (!e.dataTransfer?.types?.includes("Files")) return;
@@ -1173,30 +1222,16 @@ export default function Chat({
         setPageDragActive(true);
       }}
       onDragLeave={(e) => {
-        // Only count leaves when the cursor crosses the chat root
-        // boundary, not when it crosses a child. e.currentTarget is the
-        // chat root, e.relatedTarget is the element being entered —
-        // if it's still inside our root, ignore the leave.
         const next = e.relatedTarget as Node | null;
         if (next && e.currentTarget.contains(next)) return;
         pageDragDepth.current = Math.max(0, pageDragDepth.current - 1);
         if (pageDragDepth.current === 0) setPageDragActive(false);
       }}
       onDragOver={(e) => {
-        // Allow drops anywhere in the chat surface, not only on the
-        // composer box. preventDefault here makes the whole chat area a
-        // drop target so the user's cursor doesn't switch to the
-        // "blocked" cursor in the empty middle. The composer handles
-        // its own overlay; outside the composer we just let the drop
-        // bubble up to the window-level handler below.
         if (!e.dataTransfer?.types?.includes("Files")) return;
         e.preventDefault();
       }}
       onDrop={(e) => {
-        // If the composer caught it, this won't fire because the
-        // composer calls stopPropagation... actually it doesn't; we
-        // guard with `e.defaultPrevented` so a drop the composer
-        // already handled won't double-upload.
         if (e.defaultPrevented) return;
         if (!e.dataTransfer?.types?.includes("Files")) return;
         e.preventDefault();
@@ -1233,9 +1268,10 @@ export default function Chat({
         info={info}
         model={model}
         onChangeModel={setModel}
-        effort={effort}
-        onChangeEffort={setEffort}
         modelOptions={modelOptions}
+        artifactCount={artifacts.length}
+        artifactPanelOpen={showArtifactPanel}
+        onToggleArtifacts={() => setShowArtifactPanel(!showArtifactPanel)}
       />
 
       <MessageList
@@ -1250,6 +1286,7 @@ export default function Chat({
         mainScrollRef={mainScrollRef}
         sessionId={sessionId}
         onRegenerate={regenerate}
+        onSuggestion={(text) => setInput(text)}
       />
 
       <Composer
@@ -1267,14 +1304,6 @@ export default function Chat({
         onManageSkills={onManageSkills}
         onFiles={(files) => onFiles(files)}
       />
-
-      {showArtifactPanel && (
-        <ArtifactPanel
-          artifacts={artifacts}
-          sessionId={sessionId}
-          onClose={() => setShowArtifactPanel(false)}
-        />
-      )}
 
       {showSkillsModal && (
         <SkillsModal
@@ -1305,7 +1334,18 @@ export default function Chat({
     </div>
   );
 
-  return chatArea;
+  return (
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:flex-row">
+      {chatColumn}
+      {showArtifactPanel && (
+        <ArtifactPanel
+          artifacts={artifacts}
+          sessionId={sessionId}
+          onClose={() => setShowArtifactPanel(false)}
+        />
+      )}
+    </div>
+  );
 }
 
 function readAsDataUrl(f: File): Promise<string> {

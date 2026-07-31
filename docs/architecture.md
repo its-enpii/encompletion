@@ -36,11 +36,11 @@ Awalnya backend spawn subprocess `claude --output-format stream-json` dan pipe k
 
 ### Backend
 
-- **`server.js`**: bootstrap admin pertama kalau `users` kosong, mount router `/api/*`, SSE di `/api/runs/:id/events`. `requireAuth` (JWT) untuk route privat; `requireApiKey` untuk `/v1`.
-- **`llm-runner.js`**: HTTP streaming chat-completions. Bangun pesan (system + history + hasil tool), loop sampai model berhenti minta tool, emit `text`/`tool_use`/`tool_result`/`result` lewat `EventEmitter`. Controller expose `{ kill, proc }` supaya `server.js` bisa persist pesan + cancel.
-- **`db/index.js`**: SQLite WAL, migrasi in-place idempotent (`ALTER TABLE ADD COLUMN` kalau kolom belum ada). Skema: `users`, `user_settings`, `projects`, `sessions`, `messages`, `attachments`, `artifacts`, `api_keys`, `models`, `skills`.
+- **`server.js`**: bootstrap admin pertama kalau `users` kosong, mount router `/api/*`. `requireAuth` (JWT) untuk route privat.
+- **`llm-runner.js`**: HTTP streaming chat-completions. Bangun pesan (system + history + hasil tool), loop sampai model berhenti minta tool, emit `text`/`tool_use`/`tool_result`/`result` lewat `EventEmitter`.
+- **`db/index.js`**: SQLite WAL, migrasi in-place idempotent. Skema: `users`, `user_settings`, `projects`, `sessions`, `messages`, `attachments`, `artifacts`, `models`, memory/RAG tables.
 - **`run-registry.js`**: peta runId → emitter, supaya SSE handler push event dari runner di request terpisah.
-- **`tools.js`** + **`skill_loader.js`**: tool ke model (`Read`, `Write`, `Edit`, `Bash`, `Skill_list`, `Skill_read`). Skill di `$HOME/.enllm/skills/` (global per user, bukan per session).
+- **`tools.js`** + **`skill_loader.js`**: tool ke model (`Read`, `Write`, `Edit`, `Glob`, `Grep`, `Web*`, `EmitArtifact`, `Skill_*`). Skill di `$HOME/.enllm/skills/`.
 - **`rag.js`**: chunk dokumen per project, embed `@xenova/transformers`, retrieve top-k saat prompt masuk.
 
 ### Frontend
@@ -49,23 +49,22 @@ Awalnya backend spawn subprocess `claude --output-format stream-json` dan pipe k
 - **`app/chat/[id]/page.tsx`** + **`components/Chat/`**: UI utama. `runStream.ts` buka `EventSource`; `MessageList` bubble + tool block + artifact card; `Composer` input + attachment.
 - **`components/Sidebar/`**: daftar project, session, pencarian.
 - **`components/ArtifactPanel.tsx`**: split-pane kanan preview artifact (HTML/React/SVG/Markdown).
-- **`app/settings/api-keys/`**: admin buat API key scoped per model; user hit `POST /v1/chat/completions`.
+- **`components/AdminPanel/`**: users, roles, models, memory, system prompt (dialog overlays).
 
 ## SSE vs Socket.IO
 
 Repo pakai **SSE** (server→client) lewat `EventSource`, bukan Socket.IO. Chat hanya butuh stream dari server; client kirim lewat HTTP POST. SSE + REST cukup, dan lebih mudah di balik Nginx.
 
-## Auth Dua Jalur
+## Auth
 
-1. **JWT cookie**: login browser. Middleware `requireAuth`.
-2. **API key**: header `Authorization: Bearer enc_...`. Middleware `requireApiKey`, lookup `api_keys`, lock model ke `model_id` di key. Untuk `POST /v1/chat/completions` (OpenAI-compatible).
+**JWT** saja: login browser (`requireAuth`). Header `Authorization: Bearer <jwt>` atau cookie. Provider LLM key global di env (`LLM_API_KEY`), bukan per-user.
 
 ## Environment Variables (backend)
 
 | Var | Wajib | Default | Keterangan |
 |---|---|---|---|
-| `OPENAI_API_KEY` | ya | (wajib) | API key provider |
-| `OPENAI_BASE_URL` | ya | (wajib) | Mis. `https://ai.enpiistudio.com/v1` |
+| `LLM_API_KEY` | ya | (wajib) | API key provider |
+| `LLM_BASE_URL` | ya | (wajib) | Mis. `https://ai.enpiistudio.com/v1` |
 | `PORT` | tidak | `4000` | Port internal (Nginx di depan) |
 | `DB_PATH` | tidak | `data/claude-web.db` | Path SQLite |
 | `BOOTSTRAP_USERNAME` | tidak | `admin` | User pertama saat DB kosong |

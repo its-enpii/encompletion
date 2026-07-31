@@ -55,16 +55,11 @@ function resolveWorkdir(user, requested) {
   return abs;
 }
 
-// Build SQL fragment + params that limit rows to those owned by user unless admin.
-// Returns { sql: ' AND (s.user_id = ? OR ? = \'admin\')', params: [userId, role] }
-// Owner filter used by every read query. Platform users match on
-// owner_type='user' + owner_id=user.id; embed tenant sessions will match
-// on owner_type='tenant' (handled in routes/embed.js, not here). Admin
-// sees everything under both owner types.
+// Scope rows to the caller unless admin.
 function ownedOrAdmin(user, alias = 's') {
   return {
-    sql: ` AND (${alias}.owner_type = 'user' AND ${alias}.owner_id = ? OR ? = 'admin')`,
-    params: [String(user.id), user.role || 'member'],
+    sql: ` AND (${alias}.user_id = ? OR ? = 'admin')`,
+    params: [user.id, user.role || 'member'],
   };
 }
 
@@ -73,9 +68,9 @@ function ownSessionOr404(sessionId, user) {
     .prepare(
       `SELECT * FROM sessions
         WHERE id = ?
-          AND (owner_type = 'user' AND owner_id = ? OR ? = 'admin')`
+          AND (user_id = ? OR ? = 'admin')`
     )
-    .get(sessionId, String(user.id), user.role || 'member');
+    .get(sessionId, user.id, user.role || 'member');
 }
 
 // List sessions (optionally filter by project_id, exclude archived, search by title).
@@ -185,8 +180,8 @@ router.post('/', (req, res) => {
   }
   const info = db
     .prepare(
-      `INSERT INTO sessions (title, model, project_id, system_prompt, user_id, workdir, owner_type, owner_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'user', ?, ?, ?)`
+      `INSERT INTO sessions (title, model, project_id, system_prompt, user_id, workdir, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       title?.trim() || null,
@@ -195,7 +190,6 @@ router.post('/', (req, res) => {
       system_prompt || null,
       req.user.id,
       safeWorkdir,
-      String(req.user.id),
       new Date().toISOString(),
       new Date().toISOString()
     );

@@ -6,10 +6,9 @@
  *  2. Session over THRESHOLD + never compacted → row written + last_compacted_at bumped
  *  3. Session over THRESHOLD + already compacted + no new messages → skipped
  *  4. Session over THRESHOLD + new message arrived → re-compacted (rolling update)
- *  5. Embed/tenant session → skipped
- *  6. LLM error → no row written; session re-attempted later
- *  7. Rolling: 2nd run with no new messages → no DB write
- *  8. startCompactorWorker / stopCompactorWorker are idempotent
+ *  5. LLM error → no row written; session re-attempted later
+ *  6. Rolling: 2nd run with no new messages → no DB write
+ *  7. startCompactorWorker / stopCompactorWorker are idempotent
  *
  * Run: node --test src/compactor-worker.test.js
  */
@@ -42,7 +41,7 @@ function seedUser() {
   return Number(id);
 }
 
-function seedSession(userId, ownerType = 'user', ageMs = 0) {
+function seedSession(userId, ageMs = 0) {
   // Use SQLite-native datetime format for updated_at so the SQL
   // comparisons against last_compacted_at work the same as the
   // worker's filter.
@@ -52,10 +51,10 @@ function seedSession(userId, ownerType = 'user', ageMs = 0) {
   const title = `cmp-${crypto.randomBytes(3).toString('hex')}`;
   const id = db
     .prepare(
-      `INSERT INTO sessions (title, model, user_id, owner_type, owner_id, updated_at)
-       VALUES (?, 'workspace', ?, ?, ?, ?)`
+      `INSERT INTO sessions (title, model, user_id, updated_at)
+       VALUES (?, 'workspace', ?, ?)`
     )
-    .run(title, userId, ownerType, String(userId), iso).lastInsertRowid;
+    .run(title, userId, iso).lastInsertRowid;
   seeded.sessions.push(Number(id));
   return Number(id);
 }
@@ -181,16 +180,6 @@ test('new message arrives after compaction → re-compacted (rolling)', async ()
   const row2 = db.prepare(`SELECT summary, summarized_up_to FROM session_summaries WHERE session_id = ?`).get(sid);
   assert.ok(row2.summarized_up_to > firstSummaryUpTo, 'summarized_up_to advanced');
   assert.match(row2.summary, /rolling update/);
-});
-
-test('embed/tenant session → skipped', async () => {
-  const sid = seedSession(aliceId, 'tenant');
-  for (let i = 0; i < _internals.THRESHOLD + 5; i++) {
-    seedMessage(sid, i % 2 === 0 ? 'user' : 'assistant', `embed msg ${i}`);
-  }
-  await runOnce();
-  const row = db.prepare(`SELECT * FROM session_summaries WHERE session_id = ?`).get(sid);
-  assert.equal(row, undefined, 'tenant session skipped');
 });
 
 test('LLM error → no row written; session re-attempted later', async () => {

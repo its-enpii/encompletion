@@ -41,9 +41,7 @@ before(async () => {
           const uid = req.header('X-Test-User');
           const role = req.header('X-Test-Role') || 'member';
           if (uid) {
-            // ownedOrAdmin binds `String(user.id)` against owner_id
-            // (TEXT column). Match that by passing a string.
-            req.user = { id: String(uid), role };
+            req.user = { id: Number(uid), role };
           }
           next();
         },
@@ -74,9 +72,9 @@ function seedUser() {
 function seedSession(userId, { archived = false, projectId = null } = {}) {
   const archivedAt = archived ? new Date().toISOString() : null;
   const info = db.prepare(
-    `INSERT INTO sessions (user_id, owner_type, owner_id, title, model, archived_at, project_id)
-     VALUES (?, 'user', ?, ?, 'workspace', ?, ?)`
-  ).run(userId, String(userId), `count-${crypto.randomBytes(3).toString('hex')}`, archivedAt, projectId);
+    `INSERT INTO sessions (user_id, title, model, archived_at, project_id)
+     VALUES (?, ?, 'workspace', ?, ?)`
+  ).run(userId, `count-${crypto.randomBytes(3).toString('hex')}`, archivedAt, projectId);
   const id = Number(info.lastInsertRowid);
   seeded.sessionIds.push(id);
   return id;
@@ -94,16 +92,16 @@ test('count returns owned non-archived total only', async () => {
   // Clean prior test rows so we get a deterministic baseline.
   db.prepare(`DELETE FROM sessions WHERE title LIKE 'count-%'`).run();
   const u = seedUser();
-  for (let i = 0; i < 5; i++) seedSession(u.id);
+  for (let i = 0; i < 5; i++) seedSession(u);
   // Two archived — should be excluded by default.
-  seedSession(u.id, { archived: true });
-  seedSession(u.id, { archived: true });
-  const r = await getCount(u.id, 'member');
+  seedSession(u, { archived: true });
+  seedSession(u, { archived: true });
+  const r = await getCount(u, 'member');
   assert.equal(r.status, 200);
   assert.equal(typeof r.body.total, 'number');
   assert.ok(r.body.total >= 5, `expected >=5 owned non-archived, got ${r.body.total}`);
   // Sanity: count grew when include_archived=1.
-  const r2 = await getCount(u.id, 'member', '?include_archived=1');
+  const r2 = await getCount(u, 'member', '?include_archived=1');
   assert.ok(r2.body.total >= r.body.total, 'include_archived should be >= default');
 });
 
@@ -125,12 +123,12 @@ test('count does not leak other users sessions', async () => {
   const aliceTag = `count-alice-${Date.now()}`;
   const bobTag = `count-bob-${Date.now()}`;
   const insert = db.prepare(
-    `INSERT INTO sessions (user_id, owner_type, owner_id, title, model) VALUES (?, 'user', ?, ?, 'workspace')`
+    `INSERT INTO sessions (user_id, title, model) VALUES (?, ?, 'workspace')`
   );
-  for (let i = 0; i < 2; i++) insert.run(alice.id, String(alice.id), `${aliceTag}-${i}`);
-  for (let i = 0; i < 3; i++) insert.run(bob.id, String(bob.id), `${bobTag}-${i}`);
-  const a = await getCount(alice.id, 'member');
-  const b = await getCount(bob.id, 'member');
+  for (let i = 0; i < 2; i++) insert.run(alice, `${aliceTag}-${i}`);
+  for (let i = 0; i < 3; i++) insert.run(bob, `${bobTag}-${i}`);
+  const a = await getCount(alice, 'member');
+  const b = await getCount(bob, 'member');
   // Both must include their own inserts.
   assert.ok(a.body.total >= 2, `alice count too low: ${a.body.total}`);
   assert.ok(b.body.total >= 3, `bob count too low: ${b.body.total}`);
@@ -152,13 +150,13 @@ test('count scopes to project_id filter', async () => {
   // sessions.project_id resolves — using a hard-coded ID like 900_001
   // would fail with FOREIGN KEY constraint if no row exists there.
   const pinfo = db.prepare(
-    `INSERT INTO projects (user_id, owner_type, owner_id, name) VALUES (?, 'user', ?, ?)`
-  ).run(u.id, String(u.id), 'count-project');
+    `INSERT INTO projects (user_id, name) VALUES (?, ?)`
+  ).run(u, 'count-project');
   const projectId = Number(pinfo.lastInsertRowid);
-  seedSession(u.id, { projectId });
-  seedSession(u.id, { projectId });
-  seedSession(u.id, { projectId: null });
-  const r = await getCount(u.id, 'member', `?project_id=${projectId}`);
+  seedSession(u, { projectId });
+  seedSession(u, { projectId });
+  seedSession(u, { projectId: null });
+  const r = await getCount(u, 'member', `?project_id=${projectId}`);
   assert.equal(r.status, 200);
   assert.equal(r.body.total, 2);
 });
@@ -167,8 +165,8 @@ test('count as admin sees aggregate', async () => {
   seeded.users.length = 0; seeded.sessionIds.length = 0;
   db.prepare(`DELETE FROM sessions WHERE title LIKE 'count-%'`).run();
   const u = seedUser();
-  for (let i = 0; i < 4; i++) seedSession(u.id);
-  const r = await getCount(u.id, 'admin');
+  for (let i = 0; i < 4; i++) seedSession(u);
+  const r = await getCount(u, 'admin');
   assert.equal(r.status, 200);
   // Admin count is aggregate, not just the seeded user's rows; we only
   // assert it covers the seeded batch + the system baseline.

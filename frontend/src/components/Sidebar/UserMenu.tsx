@@ -119,21 +119,11 @@ export function UserMenu({ user, onLogout, collapsed = false }: { user: AuthUser
                 label="Models"
                 onClick={() => { setOpen(false); openAdmin("admin:open-models"); }}
               />
-              <Item
-                icon={<EmbedIcon className="h-3.5 w-3.5" />}
-                label="Embed tenants"
-                onClick={() => { setOpen(false); openAdmin("admin:open-embed"); }}
-              />
             </>
           )}
 
           {/* Account group — visible to everyone */}
           <GroupLabel label="Account" />
-          <Item
-            icon={<KeyIcon className="h-3.5 w-3.5" />}
-            label="API Keys"
-            onClick={() => { setOpen(false); openAdmin("admin:open-api-keys"); }}
-          />
           <Item
             icon={<BrainIcon className="h-3.5 w-3.5" />}
             label="Memory"
@@ -217,21 +207,6 @@ function CpuIcon(props: React.SVGProps<SVGSVGElement>) {
       <line x1="9" y1="20" x2="9" y2="23" /><line x1="15" y1="20" x2="15" y2="23" />
       <line x1="20" y1="9" x2="23" y2="9" /><line x1="20" y1="14" x2="23" y2="14" />
       <line x1="1" y1="9" x2="4" y2="9" /><line x1="1" y1="14" x2="4" y2="14" />
-    </svg>
-  );
-}
-function EmbedIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" />
-    </svg>
-  );
-}
-function KeyIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <circle cx="8" cy="15" r="4" />
-      <path d="m10.85 12.15 8.65-8.65" /><path d="m18 5 2 2" /><path d="m15 8 2 2" />
     </svg>
   );
 }

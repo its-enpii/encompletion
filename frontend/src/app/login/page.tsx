@@ -79,7 +79,7 @@ export default function LoginPage() {
           </div>
 
           <p className="max-w-md text-[15px] leading-relaxed text-[var(--dark-text-2)]">
-            Response streaming, instruction per project, skill, dan preview artifact, semuanya di UI yang sama.
+            Kirim pesan, lampirkan dokumen, minta plan/PRD atau file Excel/PDF/PPT — AI bekerja dan hasilnya muncul di chat serta panel artifact.
           </p>
 
           <div className="space-y-3 pt-4">
@@ -91,12 +91,12 @@ export default function LoginPage() {
             <Feature
               icon="folder"
               title="Konteks project"
-              subtitle="Knowledge dan instructions ikut ke prompt"
+              subtitle="Knowledge, memory, dan instructions ikut prompt"
             />
             <Feature
-              icon="terminal"
-              title="Artifacts"
-              subtitle="HTML, React, SVG, dokumen di panel samping"
+              icon="doc"
+              title="Dokumen & artifact"
+              subtitle="Plan, diagram, Excel/PDF/PPT, HTML di panel samping"
             />
           </div>
         </div>
@@ -197,7 +197,7 @@ function Feature({
   title,
   subtitle,
 }: {
-  icon: "stream" | "folder" | "terminal";
+  icon: "stream" | "folder" | "doc";
   title: string;
   subtitle: string;
 }) {
@@ -214,8 +214,8 @@ function Feature({
   );
 }
 
-function FeatureIcon({ name, ...props }: { name: "stream" | "folder" | "terminal" } & React.SVGProps<SVGSVGElement>) {
+function FeatureIcon({ name, ...props }: { name: "stream" | "folder" | "doc" } & React.SVGProps<SVGSVGElement>) {
   if (name === "stream") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg>;
   if (name === "folder") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>;
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" /></svg>;
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>;
 }

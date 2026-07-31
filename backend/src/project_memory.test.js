@@ -44,10 +44,10 @@ function seedProject() {
   const projectName = 'proj-' + crypto.randomBytes(3).toString('hex');
   const projectId = db
     .prepare(
-      `INSERT INTO projects (user_id, name, owner_type, owner_id)
-       VALUES (?, ?, 'user', ?)`
+      `INSERT INTO projects (user_id, name)
+       VALUES (?, ?)`
     )
-    .run(userId, projectName, String(userId)).lastInsertRowid;
+    .run(userId, projectName).lastInsertRowid;
   seeded.projects.push({ projectId: Number(projectId), userId: Number(userId) });
   return Number(projectId);
 }
@@ -190,7 +190,7 @@ test('integration: prompt composition slots projectMemoryBlock between user fact
     .filter(Boolean)
     .reduce((acc, block) => acc + '\n\n' + block, systemPrompt);
 
-  // Order: persona → user facts → project facts → recall.
+  // Order: user facts → project facts → recall.
   assert.match(composed, /^BASE PROMPT\n\n<system>\nUser facts/);
   assert.match(composed, /- stack: Next\.js 15/);
   assert.ok(

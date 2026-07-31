@@ -75,25 +75,4 @@ export async function apiDelete(token: string, path: string) {
   return r.json();
 }
 
-/** Issue a fresh embed token for the test tenant via the server-to-server
- *  flow. Mirrors what a Laravel saas-app would do in production. */
-export async function issueEmbedToken(
-  tenantKey: string,
-  externalUserId: string
-): Promise<{ embed_token: string; expires_at: string }> {
-  const r = await fetch(`${BASE}/api/embed/token`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${tenantKey}`,
-    },
-    body: JSON.stringify({ external_user_id: externalUserId }),
-  });
-  if (!r.ok) {
-    const t = await r.text();
-    throw new Error(`embed token issue failed: ${r.status} ${t}`);
-  }
-  return r.json();
-}
-
 export { SEED };

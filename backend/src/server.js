@@ -2,8 +2,6 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import db from './db/index.js';
 import sessionsRouter from './routes/sessions.js';
 import projectsRouter from './routes/projects.js';
@@ -15,16 +13,12 @@ import skillsRouter from './routes/skills.js';
 import modelsRouter from './routes/models.js';
 import artifactsRouter from './routes/artifacts.js';
 import runsRouter from './routes/runs.js';
-import apiKeysRouter from './routes/api-keys.js';
-import v1Router from './routes/v1.js';
-import embedRouter from './routes/embed.js';
-import embedAdminRouter from './routes/embed-admin.js';
 import memoryRouter from './routes/memory.js';
 import { startExtractorWorker } from './extractor-worker.js';
 import { startIndexerWorker } from './indexer-worker.js';
 import { startCompactorWorker } from './compactor-worker.js';
 import { requireAuth } from './middleware/auth.js';
-import { requireApiKey } from './middleware/api-key.js';
+import { seedBuiltinSkills } from './seed-skills.js';
 
 const PORT = parseInt(process.env.PORT || '4000', 10);
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -68,11 +62,6 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '30mb' }));
 
-// Embed widget static — minimal client for tenant apps. Hosted at
-// /embed/* so the embed.js script tag stays short.
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-app.use('/embed', express.static(path.resolve(__dirname, '../public'), { fallthrough: false }));
-
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'encompletion', time: new Date().toISOString() });
 });
@@ -95,26 +84,19 @@ app.use('/api/attachments', requireAuth, attachmentsRouter);
 app.use('/api/skills', requireAuth, skillsRouter);
 app.use('/api/models', requireAuth, modelsRouter);
 app.use('/api/artifacts', requireAuth, artifactsRouter);
-app.use('/api/api-keys', requireAuth, apiKeysRouter);
 
 // Memory facts — per-user persistent context injected into every system
 // prompt. requireAuth-scoped: a user only ever sees their own facts.
 app.use('/api/memory', requireAuth, memoryRouter);
 
-// Public OpenAPI surface — auth via api-keys, model locked to the key.
-// MUST be mounted before `/api` catch-alls so v1 paths don't hit JWT.
-app.use('/api/v1', requireApiKey, v1Router);
-
-// Embed mode (E2) — browser widget API. Mixed auth:
-//   POST /api/embed/token  → tenant_api_key (server-to-server)
-//   everything else        → embed_token (issued by the route above)
-// The router handles its own auth per-handler because the two surfaces
-// can't share a single middleware.
-app.use('/api/embed', embedRouter);
-
-// Embed mode (E3.4) — admin CRUD for tenants, capability profiles,
-// tools, and the tool_executions audit log. All routes require admin.
-app.use('/api/admin/embed', embedAdminRouter);
+// Seed bundled skills (planning, prd, …) into ENLLM_SKILLS_DIR if absent.
+// Named volume often starts empty and would hide image-baked skills/.
+try {
+  const { seeded, target } = seedBuiltinSkills();
+  if (seeded.length) console.log(`[skills] seeded ${seeded.join(', ')} → ${target}`);
+} catch (e) {
+  console.warn(`[skills] seed failed: ${e?.message || e}`);
+}
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`[server] listening on http://0.0.0.0:${PORT}`);

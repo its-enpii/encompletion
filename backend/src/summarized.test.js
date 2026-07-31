@@ -27,10 +27,10 @@ function seedSession(userId) {
   const title = `sum-${crypto.randomBytes(3).toString('hex')}`;
   const id = db
     .prepare(
-      `INSERT INTO sessions (title, model, user_id, owner_type, owner_id)
-       VALUES (?, 'workspace', ?, 'user', ?)`
+      `INSERT INTO sessions (title, model, user_id)
+       VALUES (?, 'workspace', ?)`
     )
-    .run(title, userId, String(userId)).lastInsertRowid;
+    .run(title, userId).lastInsertRowid;
   seeded.sessions.push(Number(id));
   return Number(id);
 }

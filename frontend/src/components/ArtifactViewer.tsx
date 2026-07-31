@@ -1,18 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { CenteredDialog } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
+import { authFetch } from "@/lib/auth";
+
+const MarkdownViewLazy = dynamic(() => import("@/components/MarkdownView"), { ssr: false });
 
 export type Artifact = {
   id: number;
   session_id: number;
-  type: "html" | "jsx" | "react" | "svg" | "markdown" | "code" | "csv";
+  message_id?: number | null;
+  type: "html" | "jsx" | "react" | "svg" | "markdown" | "code" | "csv" | "file";
   language: string | null;
   title: string | null;
   content: string;
   version: number;
   dup_of?: number | null;
+  file_path?: string | null;
+  mime_type?: string | null;
+  file_size?: number | null;
 };
 
 type Props = {
@@ -27,6 +35,7 @@ const TYPE_META: Record<Artifact["type"], { icon: React.ReactNode; label: string
   markdown: { icon: <MarkdownIcon />, label: "Markdown", color: "var(--ink-2)", bg: "var(--paper-2)" },
   code: { icon: <CodeIcon />, label: "Code", color: "var(--ink-2)", bg: "var(--paper-2)" },
   csv: { icon: <CodeIcon />, label: "CSV", color: "#16A34A", bg: "rgba(22,163,74,0.10)" },
+  file: { icon: <CodeIcon />, label: "File", color: "var(--magenta-700)", bg: "var(--magenta-50)" },
 };
 
 export default function ArtifactViewer({ artifact }: Props) {
@@ -37,15 +46,36 @@ export default function ArtifactViewer({ artifact }: Props) {
   const meta = TYPE_META[artifact.type] ?? TYPE_META.code;
   const displayTitle = artifact.title || `Untitled ${meta.label}`;
   const ext = extFor(artifact);
-  const lineCount = artifact.content.split("\n").length;
-  const byteSize = new Blob([artifact.content]).size;
+  const isFile = artifact.type === "file";
+  const lineCount = isFile ? 0 : artifact.content.split("\n").length;
+  const byteSize = isFile
+    ? (artifact.file_size ?? 0)
+    : new Blob([artifact.content]).size;
 
   function copy() {
+    if (isFile) return;
     navigator.clipboard.writeText(artifact.content);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }
-  function download() {
+  async function download() {
+    if (isFile) {
+      try {
+        const r = await authFetch("/api/artifacts/" + artifact.id + "/download");
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const blob = await r.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = artifact.title || `file-${artifact.id}.${ext}`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        // eslint-disable-next-line no-alert
+        alert(`Gagal unduh: ${(e as Error)?.message || e}`);
+      }
+      return;
+    }
     const blob = new Blob([artifact.content], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -88,35 +118,43 @@ export default function ArtifactViewer({ artifact }: Props) {
                 <span className="font-mono">{artifact.language}</span>
               </>
             )}
-            <span className="h-0.5 w-0.5 rounded-full bg-[var(--ink-4)]" />
-            <span>{lineCount} baris</span>
+            {!isFile && (
+              <>
+                <span className="h-0.5 w-0.5 rounded-full bg-[var(--ink-4)]" />
+                <span>{lineCount} baris</span>
+              </>
+            )}
             <span className="h-0.5 w-0.5 rounded-full bg-[var(--ink-4)]" />
             <span>{formatBytes(byteSize)}</span>
           </div>
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
-          <div className="mr-1 flex items-center rounded-[var(--r-md)] bg-[var(--paper-2)] p-0.5 ring-1 ring-inset ring-[var(--line)]">
-            <Tab active={tab === "render"} onClick={() => setTab("render")} label="Render">
-              <svg viewBox="0 0 24 24" className="h-3 w-3" fill="currentColor"><polygon points="6 4 20 12 6 20" /></svg>
-            </Tab>
-            <Tab active={tab === "code"} onClick={() => setTab("code")} label="Kode">
-              <CodeIcon className="h-3 w-3" />
-            </Tab>
-          </div>
-          <Button variant="ghost" size="sm" onClick={copy} title="Salin kode">
-            {copied ? (
-              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="var(--success)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-            ) : (
-              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="9" y="9" width="13" height="13" rx="2" />
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-              </svg>
-            )}
-          </Button>
-          <Button variant="ghost" size="sm" onClick={download} title={`Unduh .${ext}`}>
+          {!isFile && (
+            <div className="mr-1 flex items-center rounded-[var(--r-md)] bg-[var(--paper-2)] p-0.5 ring-1 ring-inset ring-[var(--line)]">
+              <Tab active={tab === "render"} onClick={() => setTab("render")} label="Render">
+                <svg viewBox="0 0 24 24" className="h-3 w-3" fill="currentColor"><polygon points="6 4 20 12 6 20" /></svg>
+              </Tab>
+              <Tab active={tab === "code"} onClick={() => setTab("code")} label="Kode">
+                <CodeIcon className="h-3 w-3" />
+              </Tab>
+            </div>
+          )}
+          {!isFile && (
+            <Button variant="ghost" size="sm" onClick={copy} title="Salin kode">
+              {copied ? (
+                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="var(--success)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+              )}
+            </Button>
+          )}
+          <Button variant="ghost" size="sm" onClick={download} title={isFile ? "Unduh file" : `Unduh .${ext}`}>
             <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
               <polyline points="7 10 12 15 17 10" />
@@ -211,6 +249,9 @@ function CodeView({ content, language }: { content: string; language: string | n
 }
 
 function RenderedArtifact({ artifact }: { artifact: Artifact }) {
+  if (artifact.type === "file") {
+    return <FileArtifactPreview artifact={artifact} />;
+  }
   if (artifact.type === "html") {
     return (
       <div className="h-full w-full bg-white">
@@ -255,9 +296,7 @@ function RenderedArtifact({ artifact }: { artifact: Artifact }) {
   if (artifact.type === "markdown") {
     return (
       <div className="bg-[var(--paper)] p-6">
-        <div className="prose prose-sm max-w-none text-[var(--ink)]">
-          <Markdown content={artifact.content} />
-        </div>
+        <MarkdownViewLazy content={artifact.content} />
       </div>
     );
   }
@@ -359,7 +398,75 @@ function parseCsvLocal(text: string, maxRows = 1000): string[][] {
   return out;
 }
 
-function htmlShell(code: string, isTs = false) {
+function FileArtifactPreview({ artifact }: { artifact: Artifact }) {
+  const lang = (artifact.language || "").toLowerCase();
+  const mime = (artifact.mime_type || "").toLowerCase();
+  const isPdf = lang === "pdf" || mime === "application/pdf" || (artifact.title || "").toLowerCase().endsWith(".pdf");
+  const [url, setUrl] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isPdf || !artifact.id) return;
+    let revoked: string | null = null;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await authFetch(`/api/artifacts/${artifact.id}/download?inline=1`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const blob = await r.blob();
+        const u = URL.createObjectURL(blob);
+        revoked = u;
+        if (!cancelled) setUrl(u);
+      } catch (e) {
+        if (!cancelled) setErr((e as Error)?.message || "Gagal memuat preview");
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (revoked) URL.revokeObjectURL(revoked);
+    };
+  }, [artifact.id, isPdf]);
+
+  if (isPdf) {
+    if (err) {
+      return (
+        <div className="flex h-full min-h-[200px] flex-col items-center justify-center gap-2 bg-[var(--paper-2)] p-6 text-center text-sm text-[var(--danger)]">
+          {err}
+        </div>
+      );
+    }
+    if (!url) {
+      return (
+        <div className="flex h-full min-h-[200px] items-center justify-center bg-[var(--paper-2)] text-sm text-[var(--ink-3)]">
+          Memuat preview PDF…
+        </div>
+      );
+    }
+    return (
+      <iframe
+        title={artifact.title || "PDF preview"}
+        src={url}
+        className="h-full min-h-[420px] w-full border-0 bg-white"
+      />
+    );
+  }
+
+  return (
+    <div className="flex h-full min-h-[200px] flex-col items-center justify-center gap-3 bg-[var(--paper-2)] p-8 text-center">
+      <div className="text-sm font-semibold text-[var(--ink)]">{artifact.title || "File"}</div>
+      <div className="text-[12px] text-[var(--ink-3)]">
+        {(artifact.language || "bin").toUpperCase()}
+        {artifact.file_size != null ? ` · ${formatBytes(artifact.file_size)}` : ""}
+      </div>
+      <p className="max-w-sm text-[13px] text-[var(--ink-2)]">
+        {artifact.content || "File biner siap diunduh dari tombol unduh di header."}
+      </p>
+    </div>
+  );
+}
+
+/** Shared React/JSX preview shell (Babel standalone). Exported for dialog. */
+export function htmlShell(code: string, isTs = false) {
   return `<!doctype html>
 <html><head>
 <meta charset="utf-8" />
@@ -374,33 +481,6 @@ body{margin:0;padding:24px;font-family:ui-sans-serif,system-ui,sans-serif;backgr
 <script type="text/babel" data-presets="env,react${isTs ? ",typescript" : ""}" data-type="module">
 ${code}
 </script></body></html>`;
-}
-
-function Markdown({ content }: { content: string }) {
-  // Heading
-  let html = content
-    .replace(/^### (.*)$/gm, '<h3 class="text-base font-semibold mt-5 mb-2 text-[var(--ink)]">$1</h3>')
-    .replace(/^## (.*)$/gm, '<h2 class="text-lg font-semibold mt-6 mb-2.5 text-[var(--ink)]">$1</h2>')
-    .replace(/^# (.*)$/gm, '<h1 class="text-2xl font-bold mt-6 mb-3 text-[var(--ink)]">$1</h1>')
-    .replace(/\*\*([^*]+)\*\*/g, '<strong class="font-semibold text-[var(--ink)]">$1</strong>')
-    .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em class="italic">$1</em>')
-    .replace(/`([^`]+)`/g, '<code class="font-mono text-[0.9em] bg-[var(--paper-2)] px-1.5 py-0.5 rounded border border-[var(--line)]">$1</code>')
-    .replace(/```([\s\S]*?)```/g, (_, code) =>
-      `<pre class="my-3 overflow-auto rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-2)] p-3 text-xs font-mono"><code>${escapeHtml(code)}</code></pre>`
-    )
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer" class="text-[var(--magenta-700)] underline hover:text-[var(--magenta-600)]">$1</a>')
-    .replace(/^&gt; (.*)$/gm, '<blockquote class="my-2 border-l-2 border-[var(--saffron-500)] bg-[var(--saffron-50)]/50 py-1.5 pl-3 text-[var(--ink-2)]">$1</blockquote>')
-    .replace(/^\s*[-*] (.*)$/gm, '<li class="ml-5 list-disc text-[var(--ink-2)]">$1</li>')
-    .replace(/(<li[^>]*>.*<\/li>\n?)+/g, (m) => `<ul class="my-2 space-y-1">${m}</ul>`)
-    .replace(/\n\n/g, '</p><p class="my-2 text-[var(--ink-2)]">')
-    .replace(/^/, '<p class="text-[var(--ink-2)]">')
-    .replace(/$/, "</p>");
-
-  return <div dangerouslySetInnerHTML={{ __html: html }} />;
-}
-
-function escapeHtml(s: string) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function slugify(s: string | null) {
@@ -425,6 +505,8 @@ function extFor(artifact: Artifact) {
     case "react": return artifact.language === "tsx" ? "tsx" : "jsx";
     case "svg": return "svg";
     case "markdown": return "md";
+    case "csv": return "csv";
+    case "file": return artifact.language || "bin";
     default: return artifact.language || "txt";
   }
 }

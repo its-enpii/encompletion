@@ -3,7 +3,7 @@
  * turn. Returns '' when no summary exists for the session.
  *
  * Block sits BELOW facts/recall in the system prompt composition so
- * the order stays: persona → facts → recall → this-session summary
+ * the order stays: facts → recall → this-session summary
  * → history.
  *
  * The summary is per-session (keyed by session_id) — no per-user

@@ -25,11 +25,7 @@ const MAX_OUTPUT_BYTES = 64 * 1024;
  * real error instead of a silent no-op.
  *
  * opts.noNetworkEgress=true blocks Bash commands that try to reach
- * the network (curl/wget/nc/etc.) — embed tenants operate on a
- * per-tenant workdir and must not phone home to the saas-app's
- * credential vault or other internal services. Implemented as a
- * pre-execution scan; child shells also get EMBED_NETWORK_DISABLED=1
- * so well-behaved CLIs that read it can self-disable.
+ * the network (curl/wget/nc/etc.). Pre-execution token scan.
  */
 const handlers = {
   Bash: (args, ctx) => runBash(args, ctx),
@@ -149,13 +145,13 @@ async function runBash({ command }, { cwd, noNetworkEgress }) {
   if (noNetworkEgress) {
     const blocked = scanForNetworkCommand(command);
     if (blocked) {
-      return { error: `network egress blocked in embed mode (binary: ${blocked})` };
+      return { error: `network egress blocked (binary: ${blocked})` };
     }
   }
   return new Promise((resolve) => {
     const proc = spawn("/bin/sh", ["-c", command], {
       cwd,
-      env: { ...safeChildEnv(), EMBED_NETWORK_DISABLED: noNetworkEgress ? "1" : "0" },
+      env: { ...safeChildEnv(), NETWORK_DISABLED: noNetworkEgress ? "1" : "0" },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let out = "";

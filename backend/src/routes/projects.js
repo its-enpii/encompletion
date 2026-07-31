@@ -14,9 +14,9 @@ function ownProjectOr404(id, user) {
     .prepare(
       `SELECT * FROM projects
         WHERE id = ?
-          AND (owner_type = 'user' AND owner_id = ? OR ? = 'admin')`
+          AND (user_id = ? OR ? = 'admin')`
     )
-    .get(id, String(user.id), user.role || 'member');
+    .get(id, user.id, user.role || 'member');
 }
 
 // List projects (optionally include archived). Admin sees all; members see own only.
@@ -24,8 +24,8 @@ router.get('/', (req, res) => {
   const { include_archived } = req.query;
   const where = [];
   const params = [];
-  where.push(`(p.owner_type = 'user' AND p.owner_id = ? OR ? = 'admin')`);
-  params.push(String(req.user.id), req.user.role || 'member');
+  where.push(`(p.user_id = ? OR ? = 'admin')`);
+  params.push(req.user.id, req.user.role || 'member');
   if (!include_archived) where.push('p.archived_at IS NULL');
   const sql = `
     SELECT p.*,
@@ -46,16 +46,15 @@ router.post('/', (req, res) => {
   if (!name?.trim()) return res.status(400).json({ error: 'name required' });
   const info = db
     .prepare(
-      `INSERT INTO projects (user_id, name, description, instructions, color, owner_type, owner_id)
-       VALUES (?, ?, ?, ?, ?, 'user', ?)`
+      `INSERT INTO projects (user_id, name, description, instructions, color)
+       VALUES (?, ?, ?, ?, ?)`
     )
     .run(
       req.user.id,
       name.trim(),
       description || null,
       instructions || null,
-      color || '#3D348B',
-      String(req.user.id)
+      color || '#3D348B'
     );
   res.json(db.prepare('SELECT * FROM projects WHERE id = ?').get(info.lastInsertRowid));
 });

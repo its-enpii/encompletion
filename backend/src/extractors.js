@@ -13,13 +13,15 @@
  *   application/pdf (text-only via pdfjs-dist; image-only via tesseract OCR)
  *   docx (via mammoth)
  *   xlsx + xls + csv (via xlsx)
+ *   pptx (slide text via zip + slide XML; legacy .ppt not supported)
  *
  * Not supported:
- *   pptx, odt, rtf, audio, video — the LLM gets [binary: name] only.
+ *   odt, rtf, legacy .ppt, audio, video — the LLM gets [binary: name] only.
  */
 
 import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
+import yauzl from 'yauzl';
 import { createWorker } from 'tesseract.js';
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -63,6 +65,116 @@ async function extractXlsx(buffer) {
     }
   }
   if (out.length === 0) return null;
+  const text = out.join('\n\n');
+  return text.length > INLINE_LIMIT ? text.slice(0, INLINE_LIMIT) + '\n\n[truncated]' : text;
+}
+
+/**
+ * PPTX is a ZIP of OOXML. Pull a:t text nodes from ppt/slides/slideN.xml
+ * (and optional notes). No image OCR — text-only, same ceiling as other extractors.
+ */
+function decodeXmlEntities(s) {
+  return String(s || '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#(\d+);/g, (_, n) => {
+      const c = Number(n);
+      return c > 0 && c < 0x110000 ? String.fromCodePoint(c) : '';
+    });
+}
+
+/** Collect text runs from OOXML (`a:t` nodes). */
+function stripXmlText(xml) {
+  const parts = [];
+  const re = /<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/gi;
+  let m;
+  while ((m = re.exec(String(xml || ''))) !== null) {
+    const t = decodeXmlEntities(m[1]).trim();
+    if (t) parts.push(t);
+  }
+  return parts.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function readZipEntry(zipfile, entry) {
+  return new Promise((resolve, reject) => {
+    zipfile.openReadStream(entry, (err, stream) => {
+      if (err) return reject(err);
+      const chunks = [];
+      stream.on('data', (c) => chunks.push(c));
+      stream.on('error', reject);
+      stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    });
+  });
+}
+
+async function extractPptx(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 4) return null;
+  // PK zip magic
+  if (buffer[0] !== 0x50 || buffer[1] !== 0x4b) return null;
+
+  const entries = await new Promise((resolve, reject) => {
+    yauzl.fromBuffer(buffer, { lazyEntries: true }, (err, zipfile) => {
+      if (err) return reject(err);
+      const found = [];
+      zipfile.readEntry();
+      zipfile.on('entry', (entry) => {
+        const name = entry.fileName.replace(/\\/g, '/');
+        if (
+          /^ppt\/slides\/slide\d+\.xml$/i.test(name) ||
+          /^ppt\/notesSlides\/notesSlide\d+\.xml$/i.test(name)
+        ) {
+          found.push(entry);
+        }
+        zipfile.readEntry();
+      });
+      zipfile.on('end', () => resolve({ zipfile, found }));
+      zipfile.on('error', reject);
+    });
+  });
+
+  const { zipfile, found } = entries;
+  const slideRe = /^ppt\/slides\/slide(\d+)\.xml$/i;
+  const notesRe = /^ppt\/notesSlides\/notesSlide(\d+)\.xml$/i;
+  const slides = new Map(); // n -> { body, notes }
+  try {
+    for (const entry of found) {
+      const name = entry.fileName.replace(/\\/g, '/');
+      const xml = await readZipEntry(zipfile, entry);
+      const text = stripXmlText(xml);
+      if (!text) continue;
+      let m = name.match(slideRe);
+      if (m) {
+        const n = Number(m[1]);
+        const cur = slides.get(n) || { body: '', notes: '' };
+        cur.body = text;
+        slides.set(n, cur);
+        continue;
+      }
+      m = name.match(notesRe);
+      if (m) {
+        const n = Number(m[1]);
+        const cur = slides.get(n) || { body: '', notes: '' };
+        cur.notes = text;
+        slides.set(n, cur);
+      }
+    }
+  } finally {
+    try { zipfile.close(); } catch { /* ignore */ }
+  }
+
+  if (slides.size === 0) return null;
+  const nums = [...slides.keys()].sort((a, b) => a - b);
+  const out = [];
+  for (const n of nums) {
+    const s = slides.get(n);
+    const parts = [`## Slide ${n}`];
+    if (s.body) parts.push(s.body);
+    if (s.notes) parts.push(`Notes:\n${s.notes}`);
+    out.push(parts.join('\n'));
+  }
   const text = out.join('\n\n');
   return text.length > INLINE_LIMIT ? text.slice(0, INLINE_LIMIT) + '\n\n[truncated]' : text;
 }
@@ -159,6 +271,12 @@ export async function extractText({ buffer, mimeType, fileName }) {
       mime === 'application/vnd.ms-excel'
     ) {
       return await extractXlsx(buffer);
+    }
+    if (
+      name.endsWith('.pptx') ||
+      mime === 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+    ) {
+      return await extractPptx(buffer);
     }
 
     // 3. PDF — try text first, fall back to OCR for image-only scans.

@@ -35,7 +35,7 @@ Backend pakai Node's built-in test runner. Tidak ada framework test tambahan.
 cd backend
 node --test src/rag.test.js
 node --test src/run-registry.test.js
-node --test src/api-keys.test.js
+node --test src/memory.test.js
 node --test src/system-prompt.test.js
 ```
 
@@ -45,7 +45,7 @@ Atau sekaligus:
 node --test src/*.test.js
 ```
 
-Cakupan: chunker/embedder RAG, lifecycle run-registry, hash + scope API key, format system prompt.
+Cakupan: chunker/embedder RAG, lifecycle run-registry, format system prompt, memory/workers.
 
 ## Struktur kode
 

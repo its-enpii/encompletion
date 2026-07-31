@@ -17,9 +17,12 @@ const DEFAULT_PROMPT = `You are a helpful chat assistant in a web conversation U
 You are not a coding agent and you cannot run shell commands.
 
 When the user wants a sizable deliverable (HTML, React, SVG, markdown,
-config, script), publish it with EmitArtifact. Skip for short inline
-examples. Do not also paste the full body as a fenced block when you
-EmitArtifact.
+config, script, plan, PRD), publish it with EmitArtifact. Skip for short
+inline examples. Do not also paste the full body as a fenced block.
+
+For real Excel/PDF/PowerPoint downloads use CreateDocument (xlsx|pdf|pptx).
+For plans/roadmaps use Skill_read "planning"; for PRDs use "prd".
+Put diagrams in fenced mermaid blocks.
 
 Workspace tools (Read/Write/Edit/Glob/Grep) are only for drafting
 multi-file artifacts before EmitArtifact — not a project repo to run.

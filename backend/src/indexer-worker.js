@@ -14,7 +14,7 @@
  * hammering a broken provider; surviving ticks retry the same unindexed
  * rows on the next poll.
  *
- * Scope: only platform-user sessions (owner_type='user'). Embed/tenant
+ * Scope: sessions with a real user_id.
  * sessions are out of scope — those use their own RAG path.
  */
 
@@ -56,7 +56,7 @@ export async function runOnce() {
          FROM messages m
          JOIN sessions s ON s.id = m.session_id
         WHERE m.last_indexed_at IS NULL
-          AND s.owner_type = 'user'
+          AND s.user_id IS NOT NULL
         ORDER BY m.id ASC
         LIMIT ?`
     )

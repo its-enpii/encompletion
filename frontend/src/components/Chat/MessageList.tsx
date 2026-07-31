@@ -32,6 +32,7 @@ export function MessageList({
   mainScrollRef,
   sessionId,
   onRegenerate,
+  onSuggestion,
 }: {
   messages: Msg[];
   toolUses: ToolUse[];
@@ -44,6 +45,7 @@ export function MessageList({
   mainScrollRef: React.RefObject<HTMLDivElement | null>;
   sessionId: number | null;
   onRegenerate?: (assistantMsgId: number) => void;
+  onSuggestion?: (text: string) => void;
 }) {
   const [openArtifact, setOpenArtifact] = useState<{ id: number; title?: string | null } | null>(null);
   // Inline image preview modal — opens when the user clicks an image
@@ -87,7 +89,9 @@ export function MessageList({
             : "gap-7 py-10"
         }`}
       >
-        {messages.length === 0 && !streaming && sessionId == null && <EmptyHero />}
+        {messages.length === 0 && !streaming && sessionId == null && (
+          <EmptyHero onSuggestion={onSuggestion} />
+        )}
         {messages.map((m, idx) => {
           const prev = messages[idx - 1];
           const showAvatar = !prev || prev.role !== m.role || m.role === "user";
@@ -345,9 +349,43 @@ function TextPreview({ att }: { att: Att }) {
   );
 }
 
-function EmptyHero() {
-  // Compact on short mobile viewports so /new does not force document scroll
-  // under the Chrome address bar (4 tall cards + py-10 used to overflow).
+const SUGGESTIONS: {
+  icon: "doc" | "plan" | "sheet" | "ask";
+  title: string;
+  subtitle: string;
+  prompt: string;
+  className?: string;
+}[] = [
+  {
+    icon: "ask",
+    title: "Tanya & riset",
+    subtitle: "Jawaban + sumber dari web bila perlu",
+    prompt: "Jelaskan singkat konsep X dan beri 2 sumber terpercaya.",
+  },
+  {
+    icon: "doc",
+    title: "Baca dokumen",
+    subtitle: "Lampirkan PDF/Excel/DOCX, minta ringkasan",
+    prompt: "Saya lampirkan file. Ringkas poin utamanya dan daftar action item.",
+  },
+  {
+    icon: "plan",
+    title: "Buat plan / PRD",
+    subtitle: "Outline, task, diagram alur (mermaid)",
+    prompt: "Buatkan plan untuk fitur onboarding user baru, lengkap dengan diagram alur.",
+    className: "hidden sm:flex",
+  },
+  {
+    icon: "sheet",
+    title: "Buat file Excel/PDF/PPT",
+    subtitle: "Spreadsheet, PDF, atau PowerPoint siap unduh",
+    prompt: "Buatkan file PowerPoint 5 slide ringkas tentang onboarding user baru (judul + bullet per slide).",
+    className: "hidden sm:flex",
+  },
+];
+
+function EmptyHero({ onSuggestion }: { onSuggestion?: (text: string) => void }) {
+  // Compact on short mobile viewports so /new fits without page scroll.
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col items-center gap-3 text-center anim-fade-in sm:gap-5">
       <div className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-[var(--saffron-100)] via-[var(--saffron-300)] to-[var(--saffron-500)] text-[var(--ink)] shadow-[inset_0_2px_0_rgba(255,255,255,0.5),0_8px_24px_rgba(232,162,43,0.25)] sm:h-16 sm:w-16">
@@ -358,36 +396,24 @@ function EmptyHero() {
 
       <div className="px-2">
         <h2 className="text-xl font-semibold tracking-tight text-[var(--ink)] sm:text-2xl">
-          Mulai percakapan baru
+          Kirim → AI kerja → hasil
         </h2>
         <p className="mt-1 text-sm text-[var(--ink-3)]">
-          Tanyakan apa saja. Konteks diingat selama sesi berlangsung.
+          Tanya, lampirkan dokumen (termasuk PPTX), minta plan/PRD, atau file Excel/PDF/PPT. Artifact di panel.
         </p>
       </div>
 
       <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
-        <SuggestionCard
-          icon="code"
-          title="Jelaskan kode ini"
-          subtitle="Tempel snippet, dapat penjelasan per baris"
-        />
-        <SuggestionCard
-          icon="bug"
-          title="Debug error ini"
-          subtitle="Paste stack trace, dapat diagnosis dan fix"
-        />
-        <SuggestionCard
-          className="hidden sm:flex"
-          icon="rocket"
-          title="Buatkan boilerplate"
-          subtitle="Scaffold project, komponen, atau test"
-        />
-        <SuggestionCard
-          className="hidden sm:flex"
-          icon="git"
-          title="Review pull request"
-          subtitle="Feedback dan saran refactor"
-        />
+        {SUGGESTIONS.map((s) => (
+          <SuggestionCard
+            key={s.title}
+            icon={s.icon}
+            title={s.title}
+            subtitle={s.subtitle}
+            className={s.className}
+            onClick={() => onSuggestion?.(s.prompt)}
+          />
+        ))}
       </div>
     </div>
   );
@@ -398,14 +424,20 @@ function SuggestionCard({
   title,
   subtitle,
   className = "",
+  onClick,
 }: {
-  icon: "code" | "bug" | "rocket" | "git";
+  icon: "doc" | "plan" | "sheet" | "ask";
   title: string;
   subtitle: string;
   className?: string;
+  onClick?: () => void;
 }) {
   return (
-    <button className={`group/sugg flex items-start gap-3 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-3)] p-3 text-left shadow-[var(--shadow-1)] transition-all hover:-translate-y-0.5 hover:border-[var(--line-strong)] hover:shadow-[var(--shadow-2)] sm:p-3.5 ${className}`}>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`group/sugg flex items-start gap-3 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper-3)] p-3 text-left shadow-[var(--shadow-1)] transition-all hover:-translate-y-0.5 hover:border-[var(--line-strong)] hover:shadow-[var(--shadow-2)] sm:p-3.5 ${className}`}
+    >
       <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--r-sm)] bg-[var(--saffron-50)] text-[var(--saffron-500)] transition-colors group-hover/sugg:bg-[var(--saffron-100)]">
         <SuggestionIcon name={icon} className="h-4 w-4" />
       </span>
@@ -420,11 +452,45 @@ function SuggestionCard({
   );
 }
 
-function SuggestionIcon({ name, ...props }: { name: "code" | "bug" | "rocket" | "git" } & React.SVGProps<SVGSVGElement>) {
-  if (name === "code") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" /></svg>;
-  if (name === "bug") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><rect x="8" y="6" width="8" height="14" rx="4" /><line x1="3" y1="13" x2="6" y2="13" /><line x1="18" y1="13" x2="21" y2="13" /><line x1="12" y1="2" x2="12" y2="6" /><line x1="3" y1="3" x2="6" y2="6" /><line x1="18" y1="6" x2="21" y2="3" /></svg>;
-  if (name === "rocket") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z" /><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z" /><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0" /><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5" /></svg>;
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M13 6h3a2 2 0 0 1 2 2v7" /><line x1="6" y1="9" x2="6" y2="21" /></svg>;
+function SuggestionIcon({ name, ...props }: { name: "doc" | "plan" | "sheet" | "ask" } & React.SVGProps<SVGSVGElement>) {
+  if (name === "ask") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <circle cx="12" cy="12" r="10" />
+        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+        <line x1="12" y1="17" x2="12.01" y2="17" />
+      </svg>
+    );
+  }
+  if (name === "doc") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+        <line x1="16" y1="13" x2="8" y2="13" />
+        <line x1="16" y1="17" x2="8" y2="17" />
+      </svg>
+    );
+  }
+  if (name === "plan") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <line x1="8" y1="6" x2="21" y2="6" />
+        <line x1="8" y1="12" x2="21" y2="12" />
+        <line x1="8" y1="18" x2="21" y2="18" />
+        <line x1="3" y1="6" x2="3.01" y2="6" />
+        <line x1="3" y1="12" x2="3.01" y2="12" />
+        <line x1="3" y1="18" x2="3.01" y2="18" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <line x1="3" y1="9" x2="21" y2="9" />
+      <line x1="9" y1="21" x2="9" y2="9" />
+    </svg>
+  );
 }
 
 const CODE_LANGS: Record<string, string> = {
@@ -444,20 +510,22 @@ function FilePreviewModal({ att, onClose }: { att: Att; onClose: () => void }) {
   const isPdf = mime === "application/pdf" || ext === "pdf";
   const isDocx = ext === "docx" || mime.includes("wordprocessingml");
   const isXlsx = ["xlsx", "xls", "csv"].includes(ext) || mime.includes("spreadsheetml") || mime === "text/csv";
+  const isPptx = ["pptx", "ppt"].includes(ext) || mime.includes("presentationml") || mime === "application/vnd.ms-powerpoint";
   const isText = mime.startsWith("text/") || !!CODE_LANGS[ext];
   const isMd = mime === "text/markdown" || ext === "md" || ext === "mdx";
+  const isOfficeText = isDocx || isXlsx || isPptx;
 
   const [text, setText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    if (!isText && !isDocx && !isXlsx) return;
+    if (!isText && !isOfficeText) return;
     let cancelled = false;
     fetch(att.url)
       .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((t) => { if (!cancelled) setText(t); })
       .catch((e) => { if (!cancelled) setError(e?.message || "Gagal load file"); });
     return () => { cancelled = true; };
-  }, [att.url, isText, isDocx, isXlsx]);
+  }, [att.url, isText, isOfficeText]);
 
   // Lazy-load MarkdownView to avoid SSR (it uses heavy markdown deps).
   const MarkdownView = useMemo(
@@ -466,7 +534,7 @@ function FilePreviewModal({ att, onClose }: { att: Att; onClose: () => void }) {
   );
 
   const lang = CODE_LANGS[ext];
-  const previewText = isDocx || isXlsx
+  const previewText = isOfficeText
     ? (text || "").replace(/\s+/g, " ").trim()
     : (text || "");
 
@@ -512,7 +580,7 @@ function FilePreviewModal({ att, onClose }: { att: Att; onClose: () => void }) {
               title={att.file_name}
               className="h-[75vh] w-full bg-white"
             />
-          ) : isDocx || isXlsx ? (
+          ) : isOfficeText ? (
             <div className="max-h-[75vh] overflow-y-auto p-5">
               {error ? (
                 <div className="text-sm text-[var(--danger)]">Gagal baca file: {error}</div>

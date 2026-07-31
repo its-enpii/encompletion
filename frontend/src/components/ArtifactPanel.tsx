@@ -19,6 +19,7 @@ const TYPE_META: Record<Artifact["type"], { color: string; bg: string }> = {
   markdown: { color: "var(--ink-2)", bg: "var(--paper-2)" },
   code: { color: "var(--ink-2)", bg: "var(--paper-2)" },
   csv: { color: "#16A34A", bg: "rgba(22,163,74,0.10)" },
+  file: { color: "var(--magenta-700)", bg: "var(--magenta-50)" },
 };
 
 export default function ArtifactPanel({ artifacts, sessionId, onClose }: Props) {
@@ -215,7 +216,7 @@ function EmptyArtifacts() {
       <div>
         <p className="text-[13px] font-medium text-[var(--ink)]">Belum ada artifact</p>
         <p className="mt-1 text-[11px] text-[var(--ink-3)]">
-          HTML, React, SVG, Markdown, atau kode akan muncul di sini saat asisten mengirim output.
+          Plan, PRD, HTML, diagram, Excel/PDF/PPT, dan output lain muncul di sini saat asisten selesai bekerja.
         </p>
       </div>
     </div>

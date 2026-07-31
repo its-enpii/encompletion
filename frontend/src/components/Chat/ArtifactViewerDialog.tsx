@@ -1,19 +1,26 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
 import { authFetch } from "@/lib/auth";
 import { CenteredDialog } from "@/components/ui/Modal";
+import { htmlShell } from "@/components/ArtifactViewer";
+
+const MarkdownViewLazy = dynamic(() => import("@/components/MarkdownView"), { ssr: false });
 
 type Artifact = {
   id: number;
   session_id: number;
-  type: "html" | "jsx" | "react" | "svg" | "markdown" | "code" | "csv";
+  type: "html" | "jsx" | "react" | "svg" | "markdown" | "code" | "csv" | "file";
   language: string | null;
   title: string | null;
   content: string;
   version: number;
+  file_path?: string | null;
+  mime_type?: string | null;
+  file_size?: number | null;
 };
 
 type Props = {
@@ -32,6 +39,7 @@ const RENDERABLE: Record<Artifact["type"], boolean> = {
   code: false,
   jsx: true,
   csv: true,
+  file: false,
 };
 
 /**
@@ -97,8 +105,27 @@ export function ArtifactViewerDialog({ artifactId, title, onClose }: Props) {
     }
   }
 
-  function download() {
+  async function download() {
     if (!artifact) return;
+    // Binary file artifacts: hit server download endpoint.
+    if (artifact.type === "file") {
+      try {
+        const r = await authFetch("/api/artifacts/" + artifact.id + "/download");
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const blob = await r.blob();
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = (artifact.title || "file").replace(/[^A-Za-z0-9._-]+/g, "_");
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(a.href);
+      } catch (e) {
+        // eslint-disable-next-line no-alert
+        alert(`Gagal unduh: ${(e as Error)?.message || e}`);
+      }
+      return;
+    }
     const blob = new Blob([artifact.content], { type: "text/plain;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -127,27 +154,40 @@ export function ArtifactViewerDialog({ artifactId, title, onClose }: Props) {
             <TabBtn active={mode === "split"} onClick={() => setMode("split")}>Split</TabBtn>
           )}
           <span className="ml-auto flex items-center gap-1">
-            <TabBtn onClick={copySource} active={false}>
-              {copied ? "Copied" : "Copy"}
+            {artifact.type !== "file" && (
+              <TabBtn onClick={copySource} active={false}>
+                {copied ? "Copied" : "Copy"}
+              </TabBtn>
+            )}
+            <TabBtn onClick={download} active={false}>
+              {artifact.type === "file" ? "Unduh file" : "Download"}
             </TabBtn>
-            <TabBtn onClick={download} active={false}>Download</TabBtn>
-            <ExportBtn
-              artifactId={artifact.id}
-              format="pdf"
-              filename={artifact.title || "artifact"}
-              content={artifact.content}
-              kind={artifact.type}
-            />
-            <ExportBtn
-              artifactId={artifact.id}
-              format="xlsx"
-              filename={artifact.title || "artifact"}
-              content={artifact.content}
-              kind={artifact.type}
-            />
+            {artifact.type !== "file" && (
+              <>
+                <ExportBtn
+                  artifactId={artifact.id}
+                  format="pdf"
+                  filename={artifact.title || "artifact"}
+                  content={artifact.content}
+                  kind={artifact.type}
+                />
+                <ExportBtn
+                  artifactId={artifact.id}
+                  format="xlsx"
+                  filename={artifact.title || "artifact"}
+                  content={artifact.content}
+                  kind={artifact.type}
+                />
+              </>
+            )}
             {artifact.language && (
               <span className="rounded bg-[var(--paper-3)] px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-[var(--ink-3)]">
                 {artifact.language}
+              </span>
+            )}
+            {artifact.type === "file" && artifact.file_size != null && (
+              <span className="rounded bg-[var(--paper-3)] px-2 py-1 font-mono text-[10px] text-[var(--ink-3)]">
+                {formatBytes(artifact.file_size)}
               </span>
             )}
           </span>
@@ -162,16 +202,26 @@ export function ArtifactViewerDialog({ artifactId, title, onClose }: Props) {
           {error}
         </div>
       )}
-      {artifact && (
+      {artifact && artifact.type === "file" && (
+        <FilePreviewInDialog artifact={artifact} onDownload={download} />
+      )}
+      {artifact && artifact.type !== "file" && (
         <div className="-mx-5 -mb-5 max-h-[70vh] overflow-hidden rounded-b-[var(--r-md)] bg-[var(--paper-2)]">
           <div className={mode === "split" ? "grid grid-cols-2 gap-px bg-[var(--line)]" : ""}>
             {(mode === "preview" || mode === "split") && renderable && (
               <div className="bg-[var(--paper-2)] p-4">
-                {artifact.type === "html" || artifact.type === "react" || artifact.type === "jsx" ? (
+                {artifact.type === "html" ? (
                   <iframe
                     sandbox="allow-scripts"
                     srcDoc={artifact.content}
                     title={artifact.title || "HTML preview"}
+                    className="h-[60vh] w-full rounded border border-[var(--line)] bg-white"
+                  />
+                ) : artifact.type === "react" || artifact.type === "jsx" ? (
+                  <iframe
+                    sandbox="allow-scripts"
+                    srcDoc={htmlShell(artifact.content, artifact.language === "tsx")}
+                    title={artifact.title || "React preview"}
                     className="h-[60vh] w-full rounded border border-[var(--line)] bg-white"
                   />
                 ) : artifact.type === "svg" ? (
@@ -182,8 +232,8 @@ export function ArtifactViewerDialog({ artifactId, title, onClose }: Props) {
                     className="h-[60vh] w-full rounded border border-[var(--line)] bg-white"
                   />
                 ) : artifact.type === "markdown" ? (
-                  <div className="max-h-[60vh] overflow-auto whitespace-pre-wrap rounded border border-[var(--line)] bg-[var(--paper)] p-4 text-sm leading-[1.65] text-[var(--ink)]">
-                    {artifact.content}
+                  <div className="max-h-[60vh] overflow-auto rounded border border-[var(--line)] bg-[var(--paper)] p-4">
+                    <MarkdownViewLazy content={artifact.content} />
                   </div>
                 ) : artifact.type === "csv" ? (
                   <CsvTable content={artifact.content} />
@@ -201,6 +251,103 @@ export function ArtifactViewerDialog({ artifactId, title, onClose }: Props) {
         </div>
       )}
     </CenteredDialog>
+  );
+}
+
+function formatBytes(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return "—";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function FilePreviewInDialog({
+  artifact,
+  onDownload,
+}: {
+  artifact: Artifact;
+  onDownload: () => void;
+}) {
+  const lang = (artifact.language || "").toLowerCase();
+  const mime = (artifact.mime_type || "").toLowerCase();
+  const isPdf =
+    lang === "pdf" ||
+    mime === "application/pdf" ||
+    (artifact.title || "").toLowerCase().endsWith(".pdf");
+  const [url, setUrl] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isPdf || !artifact.id) return;
+    let revoked: string | null = null;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await authFetch(`/api/artifacts/${artifact.id}/download?inline=1`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const blob = await r.blob();
+        const u = URL.createObjectURL(blob);
+        revoked = u;
+        if (!cancelled) setUrl(u);
+      } catch (e) {
+        if (!cancelled) setErr((e as Error)?.message || "Gagal memuat preview");
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (revoked) URL.revokeObjectURL(revoked);
+    };
+  }, [artifact.id, isPdf]);
+
+  if (isPdf) {
+    return (
+      <div className="-mx-5 -mb-5 flex flex-col rounded-b-[var(--r-md)] bg-[var(--paper-2)]">
+        <div className="flex items-center justify-between gap-2 border-b border-[var(--line)] px-4 py-2">
+          <div className="min-w-0 truncate text-[12px] text-[var(--ink-3)]">
+            {(artifact.language || "pdf").toUpperCase()}
+            {artifact.file_size != null ? ` · ${formatBytes(artifact.file_size)}` : ""}
+          </div>
+          <button
+            type="button"
+            onClick={onDownload}
+            className="rounded-[var(--r-sm)] bg-[var(--magenta-600)] px-3 py-1 text-[12px] font-medium text-white hover:bg-[var(--magenta-700)]"
+          >
+            Unduh
+          </button>
+        </div>
+        {err ? (
+          <div className="p-6 text-center text-sm text-[var(--danger)]">{err}</div>
+        ) : !url ? (
+          <div className="p-10 text-center text-sm text-[var(--ink-3)]">Memuat preview PDF…</div>
+        ) : (
+          <iframe
+            title={artifact.title || "PDF preview"}
+            src={url}
+            className="h-[60vh] w-full border-0 bg-white"
+          />
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="-mx-5 -mb-5 rounded-b-[var(--r-md)] bg-[var(--paper-2)] p-8 text-center">
+      <div className="text-sm font-semibold text-[var(--ink)]">{artifact.title || "File"}</div>
+      <div className="mt-1 text-[12px] text-[var(--ink-3)]">
+        {(artifact.language || "bin").toUpperCase()}
+        {artifact.file_size != null ? ` · ${formatBytes(artifact.file_size)}` : ""}
+      </div>
+      <p className="mx-auto mt-3 max-w-md text-[13px] text-[var(--ink-2)]">
+        {artifact.content || "File biner siap diunduh."}
+      </p>
+      <button
+        type="button"
+        onClick={onDownload}
+        className="mt-5 rounded-[var(--r-md)] bg-[var(--magenta-600)] px-4 py-2 text-[13px] font-medium text-white hover:bg-[var(--magenta-700)]"
+      >
+        Unduh file
+      </button>
+    </div>
   );
 }
 
@@ -247,7 +394,7 @@ function ExportBtn({
   format: "xlsx" | "pdf";
   filename: string;
   content: string;
-  kind: "html" | "jsx" | "react" | "svg" | "markdown" | "code" | "csv";
+  kind: "html" | "jsx" | "react" | "svg" | "markdown" | "code" | "csv" | "file";
 }) {
   const [busy, setBusy] = useState(false);
   async function run() {
@@ -259,10 +406,12 @@ function ExportBtn({
         .replace(/^_+|_+$/g, "")
         .slice(0, 60) || `artifact-${artifactId}`;
       let blob;
+      // Client export only for text-shaped artifacts (file binaries use /download).
+      const exportKind = kind === "file" ? "code" : kind;
       if (format === "xlsx") {
-        blob = await buildXlsx(content, kind, safeName);
+        blob = await buildXlsx(content, exportKind, safeName);
       } else {
-        blob = buildPdf(content, kind, safeName);
+        blob = buildPdf(content, exportKind, safeName);
       }
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);

@@ -41,11 +41,9 @@ You can reference supporting files in the same folder, e.g. \`examples/sample.md
 `;
 
 /**
- * Skills manager — managed at the engine's home skills directory.
- * Opens from the composer. When the active chat is project-bound,
- * we surface how many skills are hidden from the chat via that
- * project's opt-out list so the operator can navigate to the
- * project config to lift the override.
+ * Skills manager — files under ENLLM_SKILLS_DIR (default ~/.enllm/skills).
+ * Opens from the composer. When the chat is project-bound, show how many
+ * skills are hidden via that project's opt-out list.
  */
 export default function SkillsModal({ onClose, currentProjectId, currentProjectName, disabledCount = 0 }: Props) {
   const { confirm } = useUi();

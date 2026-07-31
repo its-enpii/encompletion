@@ -3,11 +3,11 @@
  *
  * Covers Opsi A: projects.instructions moved from user-prompt prefix
  * to a <system> block in the model system prompt. The block is
- * pre-resolved by routes/runs.js + routes/v1.js and passed as
+ * pre-resolved by routes/runs.js and passed as
  * opts.projectInstructionsBlock to llm-runner.runLLM.
  *
  * Composition order (verified by reducer snapshot):
- *   persona → user facts → project facts → project instructions →
+ *   user facts → project facts → project instructions →
  *   recalled → session summary.
  *
  * Run: node --test src/project-instructions.test.js
@@ -46,7 +46,7 @@ test('projectInstructionsBlock slots between projectMemoryBlock and recalled', (
   const s = out.indexOf('SUMMARY');
   const p = out.indexOf('BASE_PERSONA');
   assert.ok(p >= 0 && u > p && f > u && i > f && r > i && s > r,
-    `order persona<user<facts<instr<recall<summary, got: ${out}`);
+    `order base<user<facts<instr<recall<summary, got: ${out}`);
 });
 
 test('empty projectInstructionsBlock is dropped by the reducer', () => {

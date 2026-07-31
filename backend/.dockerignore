@@ -1,0 +1,9 @@
+node_modules
+data
+storage
+*.db
+*.db-*
+.env
+npm-debug.log
+.git
+data/test-skills-seed

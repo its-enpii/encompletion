@@ -15,9 +15,10 @@ export function ChatHeader({
   info,
   model,
   onChangeModel,
-  effort,
-  onChangeEffort,
   modelOptions,
+  artifactCount = 0,
+  artifactPanelOpen = false,
+  onToggleArtifacts,
 }: {
   activeSession: Session | null;
   project: Project | null;
@@ -25,18 +26,12 @@ export function ChatHeader({
   info: string | null;
   model: string;
   onChangeModel: (m: string) => void;
-  effort: string;
-  onChangeEffort: (e: string) => void;
-  /**
-   * Models to render in the dropdown. Sourced from the admin-managed
-   * registry via `useModels()`. If the registry is still loading or the
-   * network call failed, the consumer passes a small fallback list — this
-   * way the dropdown is never empty.
-   */
   modelOptions: ModelOption[];
+  artifactCount?: number;
+  artifactPanelOpen?: boolean;
+  onToggleArtifacts?: () => void;
 }) {
   const [modelOpen, setModelOpen] = useState(false);
-  const [effortOpen, setEffortOpen] = useState(false);
   // Whether the project pill should toggle the in-page settings panel
   // (mounted on /projects/[id] and /projects/[id]/chat/[sessionId]) or
   // navigate to that route from elsewhere. Detected by route prefix so any
@@ -255,32 +250,54 @@ export function ChatHeader({
         )
       )}
 
-      <div className="hidden items-center gap-2 sm:flex">
-        <SelectPill
-          label="Effort"
-          value={effort}
-          tone="saffron"
-          options={[
-            { value: "low", label: "Low" },
-            { value: "medium", label: "Medium" },
-            { value: "high", label: "High" },
-            { value: "xhigh", label: "XHigh" },
-            { value: "max", label: "Max" },
-          ]}
-          onChange={onChangeEffort}
-          open={effortOpen}
-          setOpen={(o) => { setEffortOpen(o); if (o) setModelOpen(false); }}
-        />
-        <SelectPill
-          label="Model"
-          value={model}
-          tone="magenta"
-          options={modelOptions}
-          onChange={onChangeModel}
-          open={modelOpen}
-          setOpen={(o) => { setModelOpen(o); if (o) setEffortOpen(false); }}
-          searchable={modelOptions.length > 8}
-        />
+      <div className="flex items-center gap-2">
+        {onToggleArtifacts && (
+          <button
+            type="button"
+            onClick={onToggleArtifacts}
+            title={artifactPanelOpen ? "Tutup panel artifact" : "Buka panel artifact"}
+            aria-pressed={artifactPanelOpen}
+            className={`relative grid h-9 w-9 shrink-0 place-items-center rounded-[var(--r-sm)] border shadow-[var(--shadow-1)] transition-all ${
+              artifactPanelOpen
+                ? "border-[var(--magenta-400)] bg-[var(--magenta-50)] text-[var(--magenta-700)]"
+                : "border-[var(--line)] bg-[var(--paper-2)] text-[var(--ink-2)] hover:border-[var(--magenta-500)]/40 hover:text-[var(--magenta-700)]"
+            }`}
+          >
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="12 2 22 12 12 22 2 12" />
+            </svg>
+            {artifactCount > 0 && (
+              <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-[var(--magenta-600)] px-1 text-[9px] font-bold text-white">
+                {artifactCount > 99 ? "99+" : artifactCount}
+              </span>
+            )}
+          </button>
+        )}
+        <div className="hidden sm:block">
+          <SelectPill
+            label="Model"
+            value={model}
+            tone="magenta"
+            options={modelOptions}
+            onChange={onChangeModel}
+            open={modelOpen}
+            setOpen={setModelOpen}
+            searchable={modelOptions.length > 8}
+          />
+        </div>
+        {/* Mobile model: compact select */}
+        <label className="relative sm:hidden">
+          <span className="sr-only">Model</span>
+          <select
+            value={model}
+            onChange={(e) => onChangeModel(e.target.value)}
+            className="h-9 max-w-[9rem] truncate rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--paper-2)] px-2 text-[11px] font-medium text-[var(--ink-2)]"
+          >
+            {modelOptions.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </label>
       </div>
     </header>
   );

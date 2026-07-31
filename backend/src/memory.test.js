@@ -164,7 +164,7 @@ test('renderMemoryFactsBlock collapses newlines and caps length in value', () =>
 test('integration: prompt composition appends facts block to system prompt', async () => {
   upsertFact(bobId, 'lokasi', 'Bandung');
   // Simulate the composition logic in llm-runner.js: facts block is
-  // appended below the persona block when present.
+  // appended below the system prompt when present.
   const systemPrompt = 'BASE PROMPT';
   const memoryBlock = renderMemoryFactsBlock(bobId);
   const composed = memoryBlock ? `${systemPrompt}\n\n${memoryBlock}` : systemPrompt;
