@@ -374,6 +374,7 @@ export function runLLM(prompt, opts = {}, onEvent) {
   // the user-prompt prefix and injected here as a <system> block. Resolved
   // by the route handler; empty string when no project or no instructions.
   const projectInstructionsBlock = opts.projectInstructionsBlock || "";
+  const projectKnowledgeBlock = opts.projectKnowledgeBlock || "";
   const artifactContext = opts.artifactContext || "";
   // Cross-session recall (Phase 3): top-3 snippets from past chats
   // semantically relevant to the current prompt. runLLM is synchronous
@@ -393,7 +394,7 @@ export function runLLM(prompt, opts = {}, onEvent) {
   // Fresh clock each turn so "sekarang" / relative dates stay accurate.
   const nowBlock = buildTodayContextBlock();
   const fullSystemPrompt = (b) =>
-    [nowBlock, memoryBlock, projectMemoryBlock, projectInstructionsBlock, artifactContext, b, summaryBlock]
+    [nowBlock, memoryBlock, projectMemoryBlock, projectInstructionsBlock, projectKnowledgeBlock, artifactContext, b, summaryBlock]
       .filter(Boolean)
       .reduce((acc, block) => acc + "\n\n" + block, systemPrompt);
   const messagesRef = {

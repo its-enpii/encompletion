@@ -25,6 +25,7 @@ function compose(opts) {
     opts.memoryBlock || '',
     opts.projectMemoryBlock || '',
     opts.projectInstructionsBlock || '',
+    opts.projectKnowledgeBlock || '',
     opts.recalled || '',
     opts.summaryBlock || '',
   ].filter(Boolean);
@@ -36,16 +37,26 @@ test('project chat composes project memory without user memory', () => {
     memoryBlock: '',
     projectMemoryBlock: 'PROJECT_FACTS',
     projectInstructionsBlock: 'PROJECT_INSTRUCTIONS',
+    projectKnowledgeBlock: 'PROJECT_KNOWLEDGE',
     recalled: 'RECALLED',
     summaryBlock: 'SUMMARY',
   });
   const f = out.indexOf('PROJECT_FACTS');
   const i = out.indexOf('PROJECT_INSTRUCTIONS');
+  const k = out.indexOf('PROJECT_KNOWLEDGE');
   const r = out.indexOf('RECALLED');
   const s = out.indexOf('SUMMARY');
   const p = out.indexOf('BASE_PERSONA');
-  assert.ok(p >= 0 && !out.includes('USER_FACTS') && f > p && i > f && r > i && s > r,
+  assert.ok(p >= 0 && !out.includes('USER_FACTS') && f > p && i > f && k > i && r > k && s > r,
     `project memory must not include user facts, got: ${out}`);
+});
+
+test('project knowledge is part of system composition', () => {
+  const out = compose({
+    projectKnowledgeBlock: '<system>\n[Project Knowledge]\n- pricing: fixed\n</system>',
+  });
+  assert.match(out, /\[Project Knowledge\]/);
+  assert.match(out, /pricing: fixed/);
 });
 
 test('empty projectInstructionsBlock is dropped by the reducer', () => {

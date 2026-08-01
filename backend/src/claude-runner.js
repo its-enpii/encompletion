@@ -12,8 +12,15 @@ import { spawn } from 'node:child_process';
  */
 export function runClaude(prompt, opts = {}, onEvent) {
   const model = opts.model || process.env.DEFAULT_MODEL || 'workspace';
+  const context = [
+    opts.projectMemoryBlock,
+    opts.projectInstructionsBlock,
+    opts.projectKnowledgeBlock,
+    opts.artifactContext,
+  ].filter(Boolean).join('\n\n');
+  const finalPrompt = context ? `${context}\n\n${prompt}` : prompt;
   const args = [
-    '-p', prompt,
+    '-p', finalPrompt,
     '--model', model,
     '--output-format', 'stream-json',
     '--verbose',

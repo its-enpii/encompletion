@@ -229,6 +229,7 @@ export default function ProjectConfigPanel({ projectId }: Props) {
         body: JSON.stringify({
           title: knTitle,
           type: "file",
+          content: uploaded.content || null,
           file_path: uploaded.file_path,
           file_name: knFile.name,
           mime_type: knFile.mime,

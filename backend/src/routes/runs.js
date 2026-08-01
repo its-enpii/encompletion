@@ -24,6 +24,7 @@ import registry from '../run-registry.js';
 import { roleMayUseModel } from '../model-access.js';
 import { selectHistoryRows } from '../history.js';
 import { renderArtifactManifestBlock } from '../artifact-context.js';
+import { extractText } from '../extractors.js';
 
 const router = express.Router();
 // Auth is per-route (not router.use) so the SSE stream can accept a
@@ -70,48 +71,6 @@ function buildFinalPrompt({ dbSession, prompt, userMsgId, attachments }) {
       '\n\n';
   }
 
-  // Project context: knowledge files (bounded). Project instructions
-  // moved out of the user-prompt prefix and into the system prompt
-  // via opts.projectInstructionsBlock — see routes/runs.js handler.
-  if (dbSession.project_id) {
-    const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(dbSession.project_id);
-    if (project) {
-      const parts = [];
-      const knowledge = db
-        .prepare('SELECT title, type, content, file_path, file_name, mime_type, size FROM project_knowledge WHERE project_id = ?')
-        .all(dbSession.project_id);
-      if (knowledge.length) {
-        let knowledgeBytes = 0;
-        parts.push(
-          '[Project Knowledge]\n' +
-            knowledge.map((k) => {
-              if (k.type === 'text') {
-                const body = k.content || '';
-                knowledgeBytes += Buffer.byteLength(body, 'utf8');
-                return `--- ${k.title} ---\n${body}`;
-              }
-              // file-type knowledge: read from disk via storage path
-              const rel = k.file_path || '';
-              const abs = rel.startsWith('/')
-                ? rel
-                : (process.env.STORAGE_PATH
-                    ? path.resolve(process.env.STORAGE_PATH, rel)
-                    : rel);
-              let body = '';
-              try { body = fs.readFileSync(abs, 'utf8'); }
-              catch (e) { body = `[unable to read file: ${e.message}]`; }
-              if (Buffer.byteLength(body, 'utf8') + knowledgeBytes > MAX_KNOWLEDGE_BYTES) {
-                body = body.slice(0, Math.max(0, MAX_KNOWLEDGE_BYTES - knowledgeBytes))
-                  + `\n\n[truncated, total knowledge budget exceeded]`;
-              }
-              knowledgeBytes += Buffer.byteLength(body, 'utf8');
-              return `--- ${k.title} (file: ${k.file_name || 'attached'}, ${k.mime_type || 'application/octet-stream'}, ${k.size || '?'} bytes) ---\n${body}`;
-            }).join('\n\n')
-        );
-      }
-      if (parts.length) prefix += parts.join('\n\n') + '\n\n';
-    }
-  }
   if (dbSession.system_prompt) prefix += dbSession.system_prompt + '\n\n';
 
   // Conversation history is built separately via buildHistoryMessages()
@@ -122,6 +81,64 @@ function buildFinalPrompt({ dbSession, prompt, userMsgId, attachments }) {
   return prefix
     ? `<system>\n${prefix.trim()}\n</system>\n\n${prompt}`
     : prompt;
+}
+
+async function renderProjectKnowledgeBlock(projectId) {
+  if (!projectId) return '';
+  const rows = db
+    .prepare(
+      `SELECT id, title, type, content, file_path, file_name, mime_type, size
+         FROM project_knowledge
+        WHERE project_id = ?
+        ORDER BY id ASC`
+    )
+    .all(projectId);
+  if (rows.length === 0) return '';
+
+  const sections = [];
+  let usedBytes = 0;
+  for (const row of rows) {
+    let body = typeof row.content === 'string' ? row.content.trim() : '';
+    if (!body && row.type === 'file' && row.file_path) {
+      try {
+        const abs = row.file_path.startsWith('/')
+          ? row.file_path
+          : path.resolve(process.env.STORAGE_PATH || 'storage/attachments', row.file_path);
+        const buffer = fs.readFileSync(abs);
+        body = (await extractText({
+          buffer,
+          mimeType: row.mime_type || '',
+          fileName: row.file_name || row.title,
+        }))?.trim() || '';
+        if (body) {
+          db.prepare('UPDATE project_knowledge SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+            .run(body, row.id);
+          rag.indexSource({
+            kind: 'project_knowledge',
+            id: row.id,
+            content: `${row.title}\n\n${body}`,
+          }).catch((e) => process.stderr.write(`[runs] knowledge index failed: ${e.message}\n`));
+        }
+      } catch (e) {
+        body = `[knowledge file could not be read: ${e.message}]`;
+      }
+    }
+    if (!body) body = '[knowledge has no extractable text]';
+
+    const remaining = MAX_KNOWLEDGE_BYTES - usedBytes;
+    if (remaining <= 0) break;
+    if (Buffer.byteLength(body, 'utf8') > remaining) {
+      body = body.slice(0, remaining) + '\n\n[truncated: project knowledge budget exceeded]';
+    }
+    usedBytes += Buffer.byteLength(body, 'utf8');
+    const fileMeta = row.type === 'file'
+      ? ` (file: ${row.file_name || 'attached'}, ${row.mime_type || 'application/octet-stream'}, ${row.size || '?'} bytes)`
+      : '';
+    sections.push(`--- ${row.title}${fileMeta} ---\n${body}`);
+  }
+
+  if (sections.length === 0) return '';
+  return `<system>\n[Project Knowledge]\nUse the following project knowledge as authoritative context when answering. If it contains the answer, do not claim the information is unavailable.\n\n${sections.join('\n\n')}\n</system>`;
 }
 
 /**
@@ -479,6 +496,9 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
   const finalPrompt = await buildFinalPromptWithRag({
     dbSession, prompt: safePrompt, userMsgId, attachments, reqUserId: req.user.id,
   });
+  const projectKnowledgeBlock = dbSession.project_id
+    ? await renderProjectKnowledgeBlock(dbSession.project_id)
+    : '';
 
   // Build bounded multimodal history. The selector keeps the first user
   // turn plus the newest turns so the opening constraint survives long chats.
@@ -607,6 +627,7 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
       projectId: dbSession.project_id ?? undefined,
       projectMemoryBlock,
       projectInstructionsBlock,
+      projectKnowledgeBlock,
       artifactContext: renderArtifactManifestBlock(dbSession.id),
       disabledSkills,
       images: imageParts,

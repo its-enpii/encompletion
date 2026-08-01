@@ -146,10 +146,9 @@ router.post('/:id/knowledge', (req, res) => {
     )
     .run(req.params.id, title, type, content || null, file_path || null, file_name || null, mime_type || null, size || null);
   const row = db.prepare('SELECT * FROM project_knowledge WHERE id = ?').get(info.lastInsertRowid);
-  // Index for RAG — text-only. File-type knowledge gets the
-  // [Project Knowledge] prefix block in buildFinalPrompt; we don't
-  // try to embed binaries.
-  if (type === 'text' && typeof content === 'string' && content.trim().length > 0) {
+  // The attachment upload endpoint extracts supported file formats before
+  // this request, so file knowledge can be indexed exactly like text rows.
+  if (typeof content === 'string' && content.trim().length > 0) {
     rag
       .indexSource({
         kind: 'project_knowledge',
