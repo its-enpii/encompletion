@@ -1132,6 +1132,13 @@ export default function Chat({
       return;
     }
 
+    if (targetSessionId == null) {
+      sendingRef.current = false;
+      setStreaming(false);
+      pushChatError("Session tidak tersedia");
+      return;
+    }
+
     failedAttemptRef.current = {
       sessionId: targetSessionId,
       prompt: text,
