@@ -54,10 +54,10 @@ export default function ArtifactPanel({ artifacts, sessionId, onClose }: Props) 
   }
 
   const shellCls =
-    "fixed inset-x-0 bottom-0 z-40 flex flex-col border-t border-[var(--line)] bg-[var(--paper-2)] shadow-[0_-8px_32px_-12px_rgba(26,20,16,0.18)] md:inset-y-0 md:left-auto md:right-0 md:top-0 md:h-auto md:w-[min(420px,90vw)] md:border-l md:border-t-0 md:shadow-[var(--shadow-4)] lg:static lg:inset-auto lg:h-auto lg:w-[30rem] lg:shrink-0 lg:border-l lg:border-t-0 lg:shadow-none";
+    "fixed inset-x-0 bottom-0 z-40 flex flex-col border-t border-[var(--line)] bg-[var(--paper-2)] shadow-[0_-8px_32px_-12px_rgba(26,20,16,0.18)] md:inset-y-0 md:left-auto md:right-0 md:top-0 md:h-auto md:w-[min(420px,90vw)] md:border-l md:border-t-0 md:shadow-[var(--shadow-4)] xl:static xl:inset-auto xl:h-auto xl:w-[30rem] xl:shrink-0 xl:border-l xl:border-t-0 xl:shadow-none";
   const backdrop = onClose ? (
     <div
-      className="fixed inset-0 z-30 bg-[#1A1410]/40 backdrop-blur-sm md:block lg:hidden"
+      className="fixed inset-0 z-30 bg-[#1A1410]/40 backdrop-blur-sm md:block xl:hidden"
       onClick={onClose}
       aria-hidden="true"
     />

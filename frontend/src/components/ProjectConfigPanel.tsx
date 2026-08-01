@@ -311,7 +311,7 @@ export default function ProjectConfigPanel({ projectId }: Props) {
 
   if (loading || !project) {
     return (
-      <aside className="hidden w-[26rem] shrink-0 border-l border-[var(--line)] bg-[var(--paper-2)] p-6 text-sm text-[var(--ink-3)] lg:block">
+      <aside className="hidden w-[26rem] shrink-0 border-l border-[var(--line)] bg-[var(--paper-2)] p-6 text-sm text-[var(--ink-3)] xl:block">
         <div className="flex items-center gap-2">
           <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-[var(--line-strong)] border-t-[var(--magenta)]" />
           Memuat project…
@@ -325,14 +325,14 @@ export default function ProjectConfigPanel({ projectId }: Props) {
       {/* Tablet/mobile backdrop. At lg+ this panel is a persistent rail. */}
       {mobileOpen && (
         <div
-          className="anim-fade-in fixed inset-0 z-30 bg-[#1A1410]/40 backdrop-blur-sm lg:hidden"
+          className="anim-fade-in fixed inset-0 z-30 bg-[#1A1410]/40 backdrop-blur-sm xl:hidden"
           onClick={() => setMobileOpen(false)}
           aria-hidden="true"
         />
       )}
       <aside
-        className={`dark-scroll fixed inset-x-0 bottom-0 z-40 flex max-h-[85vh] shrink-0 flex-col overflow-hidden rounded-t-2xl border-t border-[var(--line)] bg-gradient-to-b from-[var(--paper-2)] to-[var(--paper)] shadow-[0_-8px_32px_-12px_rgba(26,20,16,0.18)] transition-transform duration-300 ease-out md:inset-y-0 md:left-auto md:right-0 md:top-0 md:max-h-none md:w-[min(420px,90vw)] md:rounded-none md:border-l md:border-t-0 md:shadow-[var(--shadow-4)] lg:static lg:inset-auto lg:w-[26rem] lg:rounded-none lg:border-l lg:border-t-0 lg:shadow-none ${
-          mobileOpen ? "translate-y-0 md:translate-x-0" : "translate-y-full md:translate-y-0 md:translate-x-full lg:translate-x-0"
+        className={`dark-scroll fixed inset-x-0 bottom-0 z-40 flex max-h-[85vh] shrink-0 flex-col overflow-hidden rounded-t-2xl border-t border-[var(--line)] bg-gradient-to-b from-[var(--paper-2)] to-[var(--paper)] shadow-[0_-8px_32px_-12px_rgba(26,20,16,0.18)] transition-transform duration-300 ease-out md:inset-y-0 md:left-auto md:right-0 md:top-0 md:max-h-none md:w-[min(420px,90vw)] md:rounded-none md:border-l md:border-t-0 md:shadow-[var(--shadow-4)] xl:static xl:inset-auto xl:w-[26rem] xl:rounded-none xl:border-l xl:border-t-0 xl:shadow-none ${
+          mobileOpen ? "translate-y-0 md:translate-x-0" : "translate-y-full md:translate-y-0 md:translate-x-full xl:translate-x-0"
         }`}
       >
         {/* Mobile drag handle — purely visual on md+; gives the user a

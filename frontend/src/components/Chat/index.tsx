@@ -1350,7 +1350,7 @@ export default function Chat({
   );
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden lg:flex-row">
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden xl:flex-row">
       {chatColumn}
       {showArtifactPanel && (
         <ArtifactPanel

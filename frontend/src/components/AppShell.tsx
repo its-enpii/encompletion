@@ -46,7 +46,7 @@ export function AppShell({
   useEffect(() => {
     if (typeof window === "undefined") return;
     const desktop = window.matchMedia("(min-width: 768px)");
-    const wide = window.matchMedia("(min-width: 1024px)");
+    const wide = window.matchMedia("(min-width: 1280px)");
     setIsDesktop(desktop.matches);
     setIsWide(wide.matches);
     function onDesktopChange(e: MediaQueryListEvent) { setIsDesktop(e.matches); }
