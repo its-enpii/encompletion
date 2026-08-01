@@ -360,8 +360,11 @@ export function runLLM(prompt, opts = {}, onEvent) {
   // falls back to the hardcoded SYSTEM_PROMPT const so behavior for
   // uncustomized users is bit-for-bit identical to before.
   const systemPrompt = resolveSystemPrompt(opts.userId);
-  // Per-user memory facts appended below the system block. DB hiccup → ''.
-  const memoryBlock = renderMemoryFactsBlock(opts.userId);
+  // Memory scopes are mutually exclusive: project chats use only project
+  // facts; projectless chats use only the user's global facts.
+  const memoryBlock = opts.projectId == null
+    ? renderMemoryFactsBlock(opts.userId)
+    : "";
   // Per-project memory facts (Phase 5) — pre-resolved by the route
   // handler so the runner stays DB-free at chat time. Empty string
   // when the session has no project or the project has no facts;
@@ -381,7 +384,7 @@ export function runLLM(prompt, opts = {}, onEvent) {
   // the IIFE still emits `init` and starts the round, so the user
   // sees no perceptible delay.
   const blocks = { recalled: "" };
-  // Order: user facts → project facts → project instructions → recalled
+  // Order: memory scope → project instructions → recalled
   // → session summary. Recall block starts empty; IIFE fills it before
   // the first chat-completions request.
   const summaryBlock = opts.sessionId

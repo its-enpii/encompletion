@@ -14,12 +14,21 @@
  *    resilient.
  */
 
-const SYSTEM = `You extract persistent user facts from chat transcripts.
+const USER_SYSTEM = `You extract persistent user facts from chat transcripts.
 Output strict JSON only: {"facts":[{"key":"<snake_case>","value":"<short>"}]}
 Rules:
 - Only facts the user explicitly stated about themselves: their work, location, preferences, language, role, tools, or background.
 - Skip anything transient (current task, opinions about today's chat).
 - Skip anything the model inferred or assumed — only what the user said.
+- key must be 1-40 chars, snake_case or kebab-case, lowercase, letter-first.
+- value under 200 chars, no newlines.
+- At most 8 facts per call. Empty array if nothing worth saving.`;
+
+const PROJECT_SYSTEM = `You extract persistent project facts from chat transcripts.
+Output strict JSON only: {"facts":[{"key":"<snake_case>","value":"<short>"}]}
+Rules:
+- Only facts explicitly stated about the project: its stack, architecture, domain, conventions, constraints, or decisions.
+- Skip personal facts about the user, transient task details, and anything inferred or assumed.
 - key must be 1-40 chars, snake_case or kebab-case, lowercase, letter-first.
 - value under 200 chars, no newlines.
 - At most 8 facts per call. Empty array if nothing worth saving.`;
@@ -61,7 +70,7 @@ let _llmImpl = callExtractorLLM;
 export function _setExtractorLLMForTests(fn) { _llmImpl = fn; }
 export function _resetExtractorLLMForTests() { _llmImpl = callExtractorLLM; }
 
-export async function extractFactsFromTranscript(messages) {
+export async function extractFactsFromTranscript(messages, { scope = "user" } = {}) {
   if (!Array.isArray(messages) || messages.length === 0) return [];
   const transcript = messages
     .slice(-TRANSCRIPT_TAIL)
@@ -73,7 +82,10 @@ export async function extractFactsFromTranscript(messages) {
     .join("\n");
   let raw;
   try {
-    raw = await _llmImpl({ system: SYSTEM, user: transcript });
+    raw = await _llmImpl({
+      system: scope === "project" ? PROJECT_SYSTEM : USER_SYSTEM,
+      user: transcript,
+    });
   } catch {
     return [];
   }
@@ -99,4 +111,11 @@ export async function extractFactsFromTranscript(messages) {
     .slice(0, MAX_FACTS);
 }
 
-export const _internals = { SYSTEM, MAX_FACTS, MAX_VALUE, TRANSCRIPT_TAIL };
+export const _internals = {
+  SYSTEM: USER_SYSTEM,
+  USER_SYSTEM,
+  PROJECT_SYSTEM,
+  MAX_FACTS,
+  MAX_VALUE,
+  TRANSCRIPT_TAIL,
+};

@@ -22,6 +22,7 @@
 import db from "./db/index.js";
 import { extractFactsFromTranscript } from "./extractor.js";
 import { upsertFact } from "./memory.js";
+import { upsertProjectFact } from "./project_memory.js";
 
 const POLL_MS = Number(process.env.MEMORY_POLL_MS) || 60_000;
 const IDLE_THRESHOLD_MS = Number(process.env.MEMORY_IDLE_MS) || 5 * 60_000; // 5 min
@@ -58,7 +59,7 @@ export async function runOnce() {
   const idleSeconds = Math.max(1, Math.floor(IDLE_THRESHOLD_MS / 1000));
   const sessions = db
     .prepare(
-      `SELECT id, user_id
+      `SELECT id, user_id, project_id
          FROM sessions
         WHERE datetime(updated_at) < datetime('now', ?)
           AND (last_memory_extracted_at IS NULL
@@ -95,12 +96,17 @@ async function processSession(s) {
     const hasAssistant = messages.some((m) => m.role === "assistant");
     if (!hasUser || !hasAssistant) return;
 
-    const facts = await extractFactsFromTranscript(messages);
+    const isProjectChat = s.project_id != null;
+    const facts = await extractFactsFromTranscript(messages, {
+      scope: isProjectChat ? "project" : "user",
+    });
     for (const f of facts) {
       try {
-        // UNIQUE(user_id,key) collision → updates value (and keeps the
-        // existing source via memory.js's update path).
-        upsertFact(s.user_id, f.key, f.value, "auto");
+        if (isProjectChat) {
+          upsertProjectFact(s.project_id, f.key, f.value, "auto");
+        } else {
+          upsertFact(s.user_id, f.key, f.value, "auto");
+        }
       } catch (e) {
         // Per-fact errors (validation, per-user cap) don't abort the
         // batch — log and move on.

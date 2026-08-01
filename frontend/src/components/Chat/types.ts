@@ -3,6 +3,7 @@ export type Msg = {
   role: "user" | "assistant";
   content: string;
   feedback?: "like" | "dislike" | null;
+  failed?: boolean;
 };
 
 export type Att = {

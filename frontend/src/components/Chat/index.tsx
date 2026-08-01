@@ -131,12 +131,7 @@ export default function Chat({
   }, []);
   function setShowArtifactPanel(v: boolean) {
     setShowArtifactPanelRaw(v);
-    setStored("artifacts:open", v ? "1" : "0");
   }
-  useEffect(() => {
-    const v = getStored("artifacts:open");
-    if (v === "1") setShowArtifactPanelRaw(true);
-  }, []);
 
   const [lastTickAt, setLastTickAt] = useState<number | null>(null);
   const [stale, setStale] = useState(false);
@@ -181,6 +176,15 @@ export default function Chat({
     if (m) setModel(m);
     const e = getStored("effort");
     if (e) setEffort(e);
+    try {
+      const raw = window.sessionStorage.getItem("app:retry-composer");
+      if (raw) {
+        const retry = JSON.parse(raw);
+        if (typeof retry?.prompt === "string") setInput(retry.prompt);
+        if (Array.isArray(retry?.attachments)) setPendingAtts(retry.attachments);
+        window.sessionStorage.removeItem("app:retry-composer");
+      }
+    } catch { /* best effort */ }
   }, []);
   useEffect(() => { setStored("model", model); }, [model]);
   useEffect(() => { setStored("effort", effort); }, [effort]);
@@ -221,6 +225,14 @@ export default function Chat({
   // touch streaming) and "404 because the run ended before we
   // subscribed" (fall back to loadSession()).
   const sourceRef = useRef<EventSource | null>(null);
+  const failedAttemptRef = useRef<{
+    sessionId: number;
+    prompt: string;
+    optimisticId: number;
+    attachments: PendingAtt[];
+    fresh: boolean;
+  } | null>(null);
+  const initialScrollSessionRef = useRef<number | null>(null);
 
   async function loadSession(id: number) {
     try {
@@ -292,6 +304,12 @@ export default function Chat({
         }
       }
       setActiveSession(s);
+      // Keep project sessions in the project-scoped sidebar. New project
+      // sessions and copied generic links can briefly land on /chat/:id;
+      // canonicalize after the authoritative session response arrives.
+      if (s.project_id && pathname === `/chat/${id}`) {
+        router.replace(`/projects/${s.project_id}/chat/${id}`);
+      }
       // The header's project pill and settings entry point must reflect
       // whichever project the user has currently bound — even when no
       // session has been saved yet (i.e. a brand-new chat with the project
@@ -357,7 +375,11 @@ export default function Chat({
           try { window.sessionStorage.removeItem(`app:active-run:${id}`); } catch { /* ignore */ }
         }
       }
-      scrollToBottom();
+      if (initialScrollSessionRef.current !== id) {
+        initialScrollSessionRef.current = id;
+        pinnedToBottomRef.current = true;
+        scrollToBottom();
+      }
     } catch (e: any) {
       pushChatError(e?.message || "Gagal load session");
     }
@@ -408,7 +430,27 @@ export default function Chat({
           })),
         }));
       }
+      failedAttemptRef.current = {
+        sessionId: pending.sessionId,
+        prompt: pending.prompt,
+        optimisticId,
+        attachments: Array.isArray(pending.attachments) ? pending.attachments : [],
+        fresh: true,
+      };
+    } else {
+      const existing = messagesRef.current.find(
+        (m) => m.role === "user" && m.content === pending.prompt
+      );
+      failedAttemptRef.current = {
+        sessionId: pending.sessionId,
+        prompt: pending.prompt,
+        optimisticId: existing?.id ?? -1,
+        attachments: Array.isArray(pending.attachments) ? pending.attachments : [],
+        fresh: true,
+      };
     }
+    pinnedToBottomRef.current = true;
+    scrollToBottom();
     // No optimistic assistant bubble. The first `text` event will
     // create the assistant row itself (the text handler pushes a new
     // bubble when `last` is a user row). Inserting an empty assistant
@@ -429,6 +471,7 @@ export default function Chat({
       persistActiveRun(runId, pending.sessionId, streamTicket);
     } catch (e: any) {
       sendingRef.current = false;
+      markFailedAttempt();
       pushChatError(e?.message || "Gagal kirim");
       setStreaming(false);
     }
@@ -617,12 +660,14 @@ export default function Chat({
       },
       error: (payload: { sessionId?: number; message: string }) => {
         if (!isMine(payload)) return;
+        markFailedAttempt();
         pushChatError(payload.message);
         setStreaming(false);
       },
       result: (payload: { sessionId: number; isError: boolean; errorMessage?: string; cost?: number; durationMs?: number; inputTokens?: number; outputTokens?: number }) => {
         if (!isMine(payload)) return;
         if (payload.isError) {
+          markFailedAttempt();
           pushChatError(payload.errorMessage || "engine returned is_error=true");
         }
         // Result is the authoritative "the engine finished" signal from
@@ -783,6 +828,7 @@ export default function Chat({
         // turn). Match the server's action on the client so the local
         // mirror doesn't keep showing a ghost assistant row.
         if (payload?.cleanupSessionDeleted) {
+          markFailedAttempt();
           // Whole session gone — leave the chat and go back to /new.
           // The sidebar listener below will refetch the list and the
           // deleted row drops out on its own.
@@ -792,11 +838,13 @@ export default function Chat({
           setActiveSession(null);
           setMessages([]);
         } else if (payload?.cleanupTurnDeleted) {
+          markFailedAttempt();
           // Drop the optimistic + persisted assistant row + the user
           // message it was paired with so the UI matches what the
           // server actually kept. Both ids came from this same turn
           // so a single pop on each side is sufficient.
           setMessages((cur) => {
+            const attempt = failedAttemptRef.current;
             const next = cur.slice();
             // Walk back: find the trailing assistant (if any), then
             // its preceding user, and drop both. Defensive in case
@@ -805,7 +853,7 @@ export default function Chat({
             if (next.length > 0 && next[next.length - 1].role === "assistant") {
               next.pop();
             }
-            if (next.length > 0 && next[next.length - 1].role === "user") {
+            if (attempt?.fresh && next.length > 0 && next[next.length - 1].role === "user") {
               next.pop();
             }
             return next;
@@ -912,6 +960,44 @@ export default function Chat({
     });
   }
 
+  function markFailedAttempt() {
+    const attempt = failedAttemptRef.current;
+    if (!attempt) return;
+    if (attempt.fresh) {
+      stashComposerRetry(attempt.prompt, attempt.attachments);
+      failedAttemptRef.current = null;
+      setMessages([]);
+      router.push("/new");
+      return;
+    }
+    setMessages((cur) => cur.map((m) =>
+      m.id === attempt.optimisticId ? { ...m, failed: true } : m
+    ));
+  }
+
+  function retryFailedMessage(messageId: number) {
+    const attempt = failedAttemptRef.current;
+    const message = messagesRef.current.find((m) => m.id === messageId && m.failed);
+    if (!message || !attempt || attempt.optimisticId !== messageId) return;
+    failedAttemptRef.current = null;
+    setMessages((cur) => cur.filter((m) => m.id !== messageId));
+    setAttachmentsByMsg((cur) => {
+      const next = { ...cur };
+      delete next[messageId];
+      return next;
+    });
+    void send({ text: message.content, attachments: attempt.attachments });
+  }
+
+  function stashComposerRetry(prompt: string, attachments: PendingAtt[]) {
+    try {
+      window.sessionStorage.setItem(
+        "app:retry-composer",
+        JSON.stringify({ prompt, attachments }),
+      );
+    } catch { /* best effort */ }
+  }
+
   const [showJump, setShowJump] = useState(false);
   // Page-level drag state — fires the full-page drop overlay whenever a
   // file is dragged anywhere inside the chat surface (outside the
@@ -920,11 +1006,12 @@ export default function Chat({
   const [pageDragActive, setPageDragActive] = useState(false);
   const pageDragDepth = useRef(0);
 
-  async function send() {
-    const text = input.trim();
+  async function send(override?: { text: string; attachments?: PendingAtt[] }) {
+    const text = (override?.text ?? input).trim();
+    const sendAttachments = override?.attachments ?? pendingAtts;
     // Allow send with attachments only (no text). The backend will receive
     // the attachment list and the LLM sees them via [Attachments] prefix.
-    if ((!text && pendingAtts.length === 0) || streaming || sendingRef.current) return;
+    if ((!text && sendAttachments.length === 0) || streaming || sendingRef.current) return;
     sendingRef.current = true;
     setInput("");
     setUsage(null);
@@ -948,10 +1035,10 @@ export default function Chat({
     // so the file chip shows immediately. The DB row is persisted by the
     // SSE handler; on next mount loadSession() rebuilds attachmentsByMsg
     // from the server, so the optimistic key is dropped automatically.
-    if (pendingAtts.length > 0) {
+    if (sendAttachments.length > 0) {
       setAttachmentsByMsg((cur) => ({
         ...cur,
-        [optimisticId]: pendingAtts.map((a) => ({
+        [optimisticId]: sendAttachments.map((a) => ({
           id: 0,
           file_name: a.file_name,
           mime_type: a.mime_type,
@@ -1012,22 +1099,28 @@ export default function Chat({
                 // /chat/:id will hand them to startRun() so backend
                 // persists them to message_attachments. Without this,
                 // reload after navigate-away loses the file chip.
-                attachments: pendingAtts,
+                attachments: sendAttachments,
               })
             );
           }
-          router.push(`/chat/${targetSessionId}`);
+          router.push(
+            projectId != null
+              ? `/projects/${projectId}/chat/${targetSessionId}`
+              : `/chat/${targetSessionId}`
+          );
         }
         notifySidebarChanged();
       } catch (e: any) {
         sendingRef.current = false;
+        stashComposerRetry(text, sendAttachments);
         pushChatError(e?.message || "Gagal membuat session");
         setStreaming(false);
+        router.push("/new");
         return;
       }
     } else {
-      // Existing session: backend's POST /runs persists the user message
-      // itself. We just clear the composer attachments.
+      // Existing session: keep the optimistic bubble while POST /runs
+      // persists the user message. Clear only the composer attachments.
       setPendingAtts([]);
     }
 
@@ -1039,6 +1132,15 @@ export default function Chat({
       return;
     }
 
+    failedAttemptRef.current = {
+      sessionId: targetSessionId,
+      prompt: text,
+      optimisticId,
+      attachments: sendAttachments,
+      fresh: false,
+    };
+    pinnedToBottomRef.current = true;
+    scrollToBottom();
     // Existing session: kick off the run immediately.
     try {
       const { runId, streamTicket } = await startRun({
@@ -1049,13 +1151,14 @@ export default function Chat({
         effort,
         // Pass composer attachments — backend persists them to
         // message_attachments so a reload after navigate-away rehydrates.
-        attachments: pendingAtts,
+        attachments: sendAttachments,
       });
       if (!runId) throw new Error("no run id returned");
       adoptRun(runId, streamTicket);
       persistActiveRun(runId, targetSessionId, streamTicket);
     } catch (e: any) {
       sendingRef.current = false;
+      markFailedAttempt();
       pushChatError(e?.message || "Gagal kirim");
       setStreaming(false);
     }
@@ -1301,6 +1404,7 @@ export default function Chat({
         mainScrollRef={mainScrollRef}
         sessionId={sessionId}
         onRegenerate={regenerate}
+        onRetry={retryFailedMessage}
         onSuggestion={(text) => setInput(text)}
       />
 

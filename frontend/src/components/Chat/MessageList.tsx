@@ -32,6 +32,7 @@ export function MessageList({
   mainScrollRef,
   sessionId,
   onRegenerate,
+  onRetry,
   onSuggestion,
 }: {
   messages: Msg[];
@@ -45,6 +46,7 @@ export function MessageList({
   mainScrollRef: React.RefObject<HTMLDivElement | null>;
   sessionId: number | null;
   onRegenerate?: (assistantMsgId: number) => void;
+  onRetry?: (messageId: number) => void;
   onSuggestion?: (text: string) => void;
 }) {
   const [openArtifact, setOpenArtifact] = useState<{ id: number; title?: string | null } | null>(null);
@@ -111,6 +113,7 @@ export function MessageList({
                   msg={m}
                   sessionId={sessionId}
                   onRegenerate={m.role === "assistant" && onRegenerate ? () => onRegenerate(m.id) : undefined}
+                  onRetry={m.failed && onRetry ? () => onRetry(m.id) : undefined}
                   attachments={attachmentsByMsg[m.id]}
                 />
               </div>

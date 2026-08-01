@@ -13,11 +13,13 @@ export function MessageBubble({
   msg,
   sessionId,
   onRegenerate,
+  onRetry,
   attachments,
 }: {
   msg: Msg;
   sessionId: number | null;
   onRegenerate?: () => void;
+  onRetry?: () => void;
   attachments?: { file_name: string }[];
 }) {
   const isUser = msg.role === "user";
@@ -106,6 +108,15 @@ export function MessageBubble({
             <div className="absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full bg-[var(--paper-3)] ring-2 ring-[var(--paper)] shadow-[var(--shadow-1)]">
               <span className="text-[10px] font-bold text-[var(--magenta-600)]">U</span>
             </div>
+            {msg.failed && onRetry && (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="mt-2 ml-auto block rounded-full border border-[var(--danger)]/40 bg-[var(--danger-50)] px-3 py-1 text-[11px] font-medium text-[var(--danger)] hover:bg-[var(--danger-50)]/70"
+              >
+                Coba lagi
+              </button>
+            )}
           </div>
         </div>
       ) : (
