@@ -103,12 +103,15 @@ export function ChatHeader({
 
   return (
     <header className="z-10 flex h-16 shrink-0 items-center gap-3 border-b border-[var(--line)] bg-[var(--paper)]/80 px-4 backdrop-blur-xl">
-      {/* Mobile hamburger — always shown below md. Toggles the drawer. */}
+      {/* Hamburger toggle. Visible below xl so the user can bring the
+          full sidebar drawer up over the mini rail that AppShell renders
+          between md and xl. Above xl the sidebar already lives in full
+          or mini mode; cycling it lives on the sidebar itself. */}
       <button
         type="button"
         onClick={openSidebar}
         aria-label="Open sidebar"
-        className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--paper-2)] text-[var(--ink-2)] shadow-[var(--shadow-1)] transition-all duration-200 hover:border-[var(--magenta-500)]/40 hover:bg-[var(--paper-3)] hover:text-[var(--magenta-700)] md:hidden"
+        className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--paper-2)] text-[var(--ink-2)] shadow-[var(--shadow-1)] transition-all duration-200 hover:border-[var(--magenta-500)]/40 hover:bg-[var(--paper-3)] hover:text-[var(--magenta-700)] xl:hidden"
       >
         <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
           <line x1="4" y1="6" x2="20" y2="6" />

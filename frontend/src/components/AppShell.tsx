@@ -80,7 +80,14 @@ export function AppShell({
   // Effective mode for rendering. The mobile rail is always "full" because
   // there's no horizontal room for the icon-only mini rail — touch targets
   // need labels. The persisted `mode` only matters on desktop.
-  const renderMode: SidebarMode = !isDesktop ? "full" : (!isWide && mode === "full" ? "mini" : mode);
+  // Effective mode for rendering.
+  //   - mobile (<768): always "full" so the drawer has real labels.
+  //   - tablet (768-1279): always "full" — collapsing to a 64px icon rail
+  //     squeezes the chat column too much on common tablet widths
+  //     (800-1024) and leaves no way to surface the session list.
+  //   - xl+: honor the persisted mode (full/mini/hidden) so the user
+  //     can collapse the rail when they need a wider chat.
+  const renderMode: SidebarMode = isWide ? mode : "full";
 
   // Cycle full ↔ mini. "hidden" is reachable through dedicated events
   // (app:hide-sidebar, app:show-sidebar) rather than this button, so a

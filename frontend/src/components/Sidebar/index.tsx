@@ -395,27 +395,31 @@ export default function Sidebar({
 
   return (
     <>
-      {/* Mobile backdrop: shown when the drawer is fully open. Clicking it
-          dispatches the "hidden" cycle event via the global open-sidebar
-          inverse. Kept lightweight — we just toggle a local mobile flag. */}
+      {/* Backdrop: shows on mobile (drawer over chat) and on tablet when
+          the user opens the full sidebar drawer over the mini rail.
+          xl+ never reaches here because the rail is already full or
+          mini, not a drawer. */}
       {open && (
         <div
-          className="anim-fade-in fixed inset-0 z-30 bg-[#1A1410]/40 backdrop-blur-sm md:hidden"
+          className="anim-fade-in fixed inset-0 z-30 bg-[#1A1410]/40 backdrop-blur-sm xl:hidden"
           onClick={onClose}
           aria-hidden="true"
         />
       )}
       <aside
         data-sidebar-mode={mode}
-        // Width: mobile and tablet drawer/rail use 280px; wide desktop is
-        // driven by the CSS variable so full↔mini animates cleanly.
+        // Width: mobile uses 280px; tablet drawer overlays use 280px; wide
+        // desktop uses the CSS variable so full↔mini animates cleanly.
         style={
           isMini
             ? ({ "--sb-w": "64px" } as React.CSSProperties)
             : ({ "--sb-w": "280px" } as React.CSSProperties)
         }
-className={`fixed inset-y-0 left-0 z-40 flex min-w-0 flex-col border-r border-[var(--line-dark)] bg-[var(--dark)] text-[var(--dark-text)] shadow-[var(--shadow-3)] transition-[transform,width,opacity] duration-150 ease-out md:sticky md:top-0 md:h-dvh md:translate-x-0 w-[280px] md:w-16 xl:w-[var(--sb-w)] ${
-          // Mobile drawer: open → translate-x-0, closed → -translate-x-full
+className={`fixed inset-y-0 left-0 z-40 flex min-w-0 flex-col border-r border-[var(--line-dark)] bg-[var(--dark)] text-[var(--dark-text)] shadow-[var(--shadow-3)] transition-[transform,width,opacity] duration-150 ease-out md:sticky md:top-0 md:h-dvh md:translate-x-0 w-[280px] xl:w-[var(--sb-w)] ${
+          // Drawer: below xl, `open` slides the full sidebar in over the
+          // mini rail (or over the page on mobile). Above xl the rail is
+          // always visible — the open/close events no-op and the rail
+          // follows `mode` instead.
           open
             ? "translate-x-0"
             : "-translate-x-full"
