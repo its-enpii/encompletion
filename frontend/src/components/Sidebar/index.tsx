@@ -27,16 +27,8 @@ type Props = {
   refreshKey?: number;
   open?: boolean;
   onClose?: () => void;
-  /**
-   * Desktop layout mode for the sidebar. On mobile this is forced to "drawer":
-   * the sidebar is fixed and slides in/out, controlled by `open` + `onClose`.
-   * On `md+` viewports:
-   *  - "full"   : 280px wide, always visible
-   *  - "mini"   : ~64px icon rail, always visible (text labels collapse)
-   *  - "hidden" : not rendered; chat header shows a "show sidebar" toggle
-   */
-  mode?: "full" | "mini" | "hidden";
-  onCycleMode?: () => void;
+  /** Sidebar mode on tablet and desktop; mobile always renders full drawer. */
+  mode?: "full" | "hidden";
 };
 
 type FilterMode = "all" | "starred";
@@ -49,7 +41,6 @@ export default function Sidebar({
   open = false,
   onClose,
   mode = "full",
-  onCycleMode,
 }: Props) {
   const { user, logout } = useAuth();
   const router = useRouter();
@@ -383,22 +374,11 @@ export default function Sidebar({
   const hiddenCount = Math.max(0, totalCount - SIDEBAR_VISIBLE);
   const hasMore = hiddenCount > 0;
 
-  // `mode` is a desktop concept. On mobile, the rail is always rendered as
-  // "full" (full label visibility, 280px width, no mini-icon-rail collapse)
-  // because mobile has horizontal pressure but no horizontal room for the
-  // compact rail. Inner content components (NavLink, BrandMark, UserMenu)
-  // gate their collapsed appearance on the `md:` breakpoint via the
-  // `mdCollapsed` prop below — a mobile render NEVER collapses labels
-  // even if the persisted mode is "mini".
-  const isMini = mode === "mini";
   const isHidden = mode === "hidden";
 
   return (
     <>
-      {/* Backdrop: shows on mobile (drawer over chat) and on tablet when
-          the user opens the full sidebar drawer over the mini rail.
-          xl+ never reaches here because the rail is already full or
-          mini, not a drawer. */}
+      {/* Backdrop for the mobile drawer. */}
       {open && (
         <div
           className="anim-fade-in fixed inset-0 z-30 bg-[#1A1410]/40 backdrop-blur-sm xl:hidden"
@@ -408,68 +388,45 @@ export default function Sidebar({
       )}
       <aside
         data-sidebar-mode={mode}
-        // Width: mobile uses 280px; tablet drawer overlays use 280px; wide
-        // desktop uses the CSS variable so full↔mini animates cleanly.
-        style={
-          isMini
-            ? ({ "--sb-w": "64px" } as React.CSSProperties)
-            : ({ "--sb-w": "280px" } as React.CSSProperties)
-        }
-className={`fixed inset-y-0 left-0 z-40 flex min-w-0 flex-col border-r border-[var(--line-dark)] bg-[var(--dark)] text-[var(--dark-text)] shadow-[var(--shadow-3)] transition-[transform,width,opacity] duration-150 ease-out md:sticky md:top-0 md:h-dvh md:translate-x-0 w-[280px] xl:w-[var(--sb-w)] ${
-          // Drawer: below xl, `open` slides the full sidebar in over the
-          // mini rail (or over the page on mobile). Above xl the rail is
-          // always visible — the open/close events no-op and the rail
-          // follows `mode` instead.
-          open
-            ? "translate-x-0"
-            : "-translate-x-full"
+        className={`fixed inset-y-0 left-0 z-40 flex w-[280px] min-w-0 flex-col border-r border-[var(--line-dark)] bg-[var(--dark)] text-[var(--dark-text)] shadow-[var(--shadow-3)] transition-[transform,width,opacity] duration-150 ease-out md:sticky md:top-0 md:h-dvh md:translate-x-0 ${
+          open ? "translate-x-0" : "-translate-x-full"
         } ${
-          // Hidden mode slides the rail off-screen at tablet (≥768) and
-          // above. Mobile visibility is driven purely by the drawer
-          // translate above so the hamburger events don't fight the
-          // local open state.
           isHidden
-            ? "md:-translate-x-full md:opacity-0 md:pointer-events-none md:shadow-none"
-            : "md:translate-x-0 md:opacity-100"
+            ? "md:w-0 md:-translate-x-full md:border-r-0 md:opacity-0 md:pointer-events-none md:shadow-none"
+            : "md:w-[280px] md:translate-x-0 md:opacity-100"
         }`}
       >
-        <Brand
-          onCloseMobile={onClose}
-          onCycleMode={onCycleMode}
-          mode={mode}
-        />
+        <Brand onCloseMobile={onClose} />
 
         {/* Primary nav — chat/project destinations only. Admin actions
             live in the UserMenu dropdown (avatar bottom-left) so they
             open as overlays without unmounting the sidebar. */}
-        <div className={`px-3 pb-3 ${isMini ? "md:px-2" : ""}`}>
+        <div className="px-3 pb-3">
           <div className="flex flex-col gap-0.5 rounded-[var(--r-lg)] bg-[var(--dark-2)]/60 p-1.5 ring-1 ring-inset ring-[var(--line-dark)]">
-            <NavLink href="/new" icon="home" label="Home" current={pathname === "/new"} onClick={onClose} collapsed={isMini} />
-            <NavLink href="/projects" icon="folder" label="Projects" current={pathname?.startsWith("/projects")} onClick={onClose} collapsed={isMini} />
+            <NavLink href="/new" icon="home" label="Home" current={pathname === "/new"} onClick={onClose} />
+            <NavLink href="/projects" icon="folder" label="Projects" current={pathname?.startsWith("/projects")} onClick={onClose} />
           </div>
         </div>
 
         {/* CTA — prominent, with shimmer hint */}
-        <div className={`px-3 pb-4 ${isMini ? "md:px-2" : ""}`}>
+        <div className="px-3 pb-4">
           <button
             type="button"
             onClick={gotoNewChat}
             title="New chat"
             aria-label="New chat"
-            className={`group relative flex w-full items-center overflow-hidden rounded-[var(--r-md)] bg-gradient-to-br from-[var(--magenta-400)] to-[var(--magenta-700)] text-sm font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.15),0_2px_8px_rgba(168,71,129,0.30)] transition-all hover:from-[var(--magenta-300)] hover:to-[var(--magenta-600)] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_4px_14px_rgba(168,71,129,0.40)] active:scale-[0.99] ${
-              isMini ? "md:justify-center md:px-0 md:py-2.5" : "justify-center gap-2 px-4 py-2.5"
-            }`}
+            className="group relative flex w-full items-center justify-center gap-2 overflow-hidden rounded-[var(--r-md)] bg-gradient-to-br from-[var(--magenta-400)] to-[var(--magenta-700)] px-4 py-2.5 text-sm font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.15),0_2px_8px_rgba(168,71,129,0.30)] transition-all hover:from-[var(--magenta-300)] hover:to-[var(--magenta-600)] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_4px_14px_rgba(168,71,129,0.40)] active:scale-[0.99]"
           >
             <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/15 to-transparent transition-transform duration-500 group-hover:translate-x-full" />
             <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
-            <span className={isMini ? "md:hidden" : ""}>New chat</span>
+            <span>New chat</span>
           </button>
         </div>
 
-        {!isProjectsIndex && !isMini && (
+        {!isProjectsIndex && (
           <>
             {/* Section header */}
             <div className="flex items-center justify-between gap-2 px-5 pb-2">
@@ -655,15 +612,13 @@ className={`fixed inset-y-0 left-0 z-40 flex min-w-0 flex-col border-r border-[v
           </>
         )}
 
-        {isProjectsIndex && !isMini && <div className="flex-1" />}
-
-        {isProjectsIndex && isMini && <div className="flex-1" />}
+        {isProjectsIndex && <div className="flex-1" />}
 
         {user && (
-          <div className={`border-t border-[var(--line-dark)] bg-[var(--dark-2)]/50 ${isMini ? "md:p-1.5" : "p-3"}`}>
+          <div className="border-t border-[var(--line-dark)] bg-[var(--dark-2)]/50 p-3">
             <UserMenu
               user={user}
-              collapsed={isMini}
+              collapsed={false}
               onLogout={() => {
                 logout();
                 router.push("/login");
@@ -688,24 +643,19 @@ function NavLink({
   label,
   current,
   onClick,
-  collapsed,
 }: {
   href: string;
   icon: "home" | "folder";
   label: string;
   current?: boolean;
   onClick?: () => void;
-  collapsed?: boolean;
 }) {
   return (
     <Link
       href={href}
       onClick={onClick}
       aria-current={current ? "page" : undefined}
-      title={collapsed ? label : undefined}
       className={`group flex items-center gap-2.5 rounded-[var(--r-sm)] px-2.5 py-1.5 text-[13px] transition-all ${
-        collapsed ? "md:justify-center md:px-2 md:gap-0" : ""
-      } ${
         current
           ? "bg-[var(--dark-3)] text-[var(--dark-text)] shadow-[inset_0_0_0_1px_var(--dark-4)]"
           : "text-[var(--dark-text-2)] hover:bg-[var(--dark-2)] hover:text-[var(--dark-text)]"
@@ -721,9 +671,9 @@ function NavLink({
         {icon === "home" && <HomeIcon className="h-3.5 w-3.5" />}
         {icon === "folder" && <FolderIcon className="h-3.5 w-3.5" />}
       </span>
-      <span className={`flex-1 font-medium ${collapsed ? "md:hidden" : ""}`}>{label}</span>
+      <span className="flex-1 font-medium">{label}</span>
       {current && (
-        <span className={`h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--saffron-300)] shadow-[0_0_8px_var(--saffron-300)] ${collapsed ? "md:hidden" : ""}`} />
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--saffron-300)] shadow-[0_0_8px_var(--saffron-300)]" />
       )}
     </Link>
   );
