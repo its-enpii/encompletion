@@ -18,11 +18,12 @@ import path from 'node:path';
 import db from '../db/index.js';
 import { requireAuth, requireAuthOrStreamTicket } from '../middleware/auth.js';
 import { runLLM } from '../llm-runner.js';
-import { detectArtifacts, evaluateArtifact } from '../artifact-detector.js';
 import { renderProjectMemoryFactsBlock } from '../project_memory.js';
 import rag from '../rag.js';
 import registry from '../run-registry.js';
 import { roleMayUseModel } from '../model-access.js';
+import { selectHistoryRows } from '../history.js';
+import { renderArtifactManifestBlock } from '../artifact-context.js';
 
 const router = express.Router();
 // Auth is per-route (not router.use) so the SSE stream can accept a
@@ -162,17 +163,17 @@ async function buildFinalPromptWithRag({ dbSession, prompt, userMsgId, attachmen
  * parts are reconstructed by reading the stored file from disk and
  * inlining as a base64 dataUrl — same shape the LLM gateway expects.
  */
-function buildHistoryMessages(sessionId, currentUserMsgId, max) {
+function buildHistoryMessages(sessionId, currentUserMsgId, maxChars = 24_000) {
   if (!sessionId) return [];
-  const rows = db
+  const allRows = db
     .prepare(
       `SELECT id, role, content FROM messages
          WHERE session_id = ? AND id < ?
            AND role IN ('user','assistant')
-         ORDER BY id DESC LIMIT ?`
+         ORDER BY id ASC`
     )
-    .all(sessionId, currentUserMsgId, max);
-  rows.reverse();
+    .all(sessionId, currentUserMsgId);
+  const rows = selectHistoryRows(allRows, maxChars);
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
   const atts = ids.length
@@ -478,12 +479,9 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
     dbSession, prompt: safePrompt, userMsgId, attachments, reqUserId: req.user.id,
   });
 
-  // Build per-turn multimodal history so the model can re-see images from
-  // earlier user turns. We cap at MAX_HISTORY messages; older turns get a
-  // text-only placeholder referencing the attachment filenames so the
-  // context window stays bounded.
-  const MAX_HISTORY = 10;
-  const historyMessages = buildHistoryMessages(dbSession.id, userMsgId, MAX_HISTORY);
+  // Build bounded multimodal history. The selector keeps the first user
+  // turn plus the newest turns so the opening constraint survives long chats.
+  const historyMessages = buildHistoryMessages(dbSession.id, userMsgId);
 
   // Vision support: turn the *current turn's* attachments into image_url
   // parts. Three input shapes are accepted:
@@ -608,6 +606,7 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
       projectId: dbSession.project_id ?? undefined,
       projectMemoryBlock,
       projectInstructionsBlock,
+      artifactContext: renderArtifactManifestBlock(dbSession.id),
       disabledSkills,
       images: imageParts,
       // Disable tools when the user sends only attachments with no text.
@@ -872,68 +871,8 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
       ).run(activeMsgId, rec.tool_use_id, rec.tool_name, rec.input, rec.output, rec.is_error, rec.duration_ms);
     }
 
-    // Fence-detected artifacts from the full assistant text. Capped at
-    // MAX_PER_MESSAGE to avoid panel explosion on long refactors.
-    const MAX_PER_MESSAGE = 8;
-    const detected = detectArtifacts(assistantFullText).slice(0, MAX_PER_MESSAGE);
-    const allFences = evaluateArtifact(assistantFullText);
-    const rejectionCounts = {};
-    for (const f of allFences) {
-      if (!f.verdict.keep) rejectionCounts[f.verdict.reason] = (rejectionCounts[f.verdict.reason] || 0) + 1;
-    }
-    const rejectedTotal = Object.values(rejectionCounts).reduce((a, b) => a + b, 0);
-
-    const findDupStmt = db.prepare(
-      `SELECT id FROM artifacts
-         WHERE session_id = ? AND content_hash = ?
-         ORDER BY id ASC LIMIT 1`
-    );
-    for (const art of detected) {
-      const existing = art.content_hash
-        ? findDupStmt.get(dbSession.id, art.content_hash)
-        : null;
-      if (existing) {
-        db.prepare(
-          `INSERT INTO artifacts
-             (session_id, message_id, type, language, title, content,
-              version, content_hash, dup_of)
-           VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`
-        ).run(
-          dbSession.id, activeMsgId,
-          art.type, art.language, art.title, art.content,
-          art.content_hash, existing.id
-        );
-        registry.emit(runId, 'artifact_dup', {
-          duplicate_of: existing.id, title: art.title, type: art.type, message_id: activeMsgId,
-        });
-        continue;
-      }
-      const insert = db
-        .prepare(
-          `INSERT INTO artifacts
-             (session_id, message_id, type, language, title, content,
-              version, content_hash, dup_of)
-           VALUES (?, ?, ?, ?, ?, ?, 1, ?, NULL)`
-        )
-        .run(
-          dbSession.id, activeMsgId,
-          art.type, art.language, art.title, art.content, art.content_hash
-        );
-      registry.emit(runId, 'artifact', {
-        id: insert.lastInsertRowid,
-        session_id: dbSession.id,
-        message_id: activeMsgId,
-        ...art,
-        version: 1,
-      });
-    }
-
-    if (rejectedTotal > 0) {
-      const breakdown = Object.entries(rejectionCounts)
-        .map(([reason, n]) => `${n} ${reason}`).join(', ');
-      registry.emit(runId, 'artifact_rejections', { kept: detected.length, rejected: rejectedTotal, breakdown });
-    }
-
+    // Fenced code remains part of the assistant message. Artifacts are
+    // emitted only through explicit EmitArtifact/CreateDocument tool calls.
     // Session aggregate + auto-title (first user turn only).
     // Prefer user prompt (ChatGPT-style). Assistant reply only when the
     // prompt is a greeting / empty — never put the AI answer in the chrome

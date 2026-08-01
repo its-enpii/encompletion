@@ -23,7 +23,7 @@ import { compactTranscript } from "./compactor.js";
 
 const POLL_MS = Number(process.env.COMPACTOR_POLL_MS) || 5 * 60_000;
 const BATCH_MAX = Number(process.env.COMPACTOR_BATCH_MAX) || 5;
-const THRESHOLD = Number(process.env.COMPACTOR_THRESHOLD) || 30;
+const THRESHOLD = Number(process.env.COMPACTOR_THRESHOLD) || 12;
 const RECENT_TAIL = Number(process.env.COMPACTOR_RECENT_TAIL) || 12;
 const ERROR_BACKOFF_MS = 30_000;
 

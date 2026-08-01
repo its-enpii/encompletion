@@ -183,7 +183,7 @@ export function Composer({
             </Button>
 
             <div className="ml-auto flex items-center gap-2">
-              <span className="hidden items-center gap-1 text-[11px] text-[var(--ink-3)] sm:inline-flex">
+              <span className="hidden items-center gap-1 text-[11px] text-[var(--ink-3)] lg:inline-flex">
                 <kbd className="kbd">⇧</kbd>
                 <kbd className="kbd">⏎</kbd>
                 <span>newline</span>

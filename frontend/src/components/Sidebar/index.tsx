@@ -407,16 +407,14 @@ export default function Sidebar({
       )}
       <aside
         data-sidebar-mode={mode}
-        // Width: mobile is locked to 280px (drawer). Desktop is driven by
-        // the CSS variable so the `width` property transition animates
-        // full↔mini. The `w-[280px] md:w-[var(--sb-w)]` ordering means
-        // mobile ALWAYS uses 280px regardless of the persisted mode.
+        // Width: mobile and tablet drawer/rail use 280px; wide desktop is
+        // driven by the CSS variable so full↔mini animates cleanly.
         style={
           isMini
             ? ({ "--sb-w": "64px" } as React.CSSProperties)
             : ({ "--sb-w": "280px" } as React.CSSProperties)
         }
-className={`fixed inset-y-0 left-0 z-40 flex min-w-0 flex-col border-r border-[var(--line-dark)] bg-[var(--dark)] text-[var(--dark-text)] shadow-[var(--shadow-3)] transition-[transform,width,opacity] duration-150 ease-out md:sticky md:top-0 md:h-dvh md:translate-x-0 w-[280px] md:w-[var(--sb-w)] ${
+className={`fixed inset-y-0 left-0 z-40 flex min-w-0 flex-col border-r border-[var(--line-dark)] bg-[var(--dark)] text-[var(--dark-text)] shadow-[var(--shadow-3)] transition-[transform,width,opacity] duration-150 ease-out md:sticky md:top-0 md:h-dvh md:translate-x-0 w-[280px] md:w-16 lg:w-[var(--sb-w)] ${
           // Mobile drawer: open → translate-x-0, closed → -translate-x-full
           open
             ? "translate-x-0"

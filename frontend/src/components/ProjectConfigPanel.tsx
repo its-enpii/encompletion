@@ -57,10 +57,8 @@ export default function ProjectConfigPanel({ projectId }: Props) {
   const [project, setProject] = useState<Project | null>(null);
   const [knowledge, setKnowledge] = useState<Knowledge[]>([]);
   const [loading, setLoading] = useState(true);
-  // Mobile drawer state — the panel is hidden by default on mobile and
-  // toggled via a "Settings" button mounted in the parent layout. On
-  // desktop the panel is always visible (md:flex), so this state only
-  // matters below the md breakpoint.
+  // Drawer state below the wide desktop breakpoint. The panel is a static
+  // rail at lg+ and overlays the chat on tablet/mobile.
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const [name, setName] = useState("");
@@ -313,7 +311,7 @@ export default function ProjectConfigPanel({ projectId }: Props) {
 
   if (loading || !project) {
     return (
-      <aside className="hidden w-[26rem] shrink-0 border-l border-[var(--line)] bg-[var(--paper-2)] p-6 text-sm text-[var(--ink-3)] md:block">
+      <aside className="hidden w-[26rem] shrink-0 border-l border-[var(--line)] bg-[var(--paper-2)] p-6 text-sm text-[var(--ink-3)] lg:block">
         <div className="flex items-center gap-2">
           <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-[var(--line-strong)] border-t-[var(--magenta)]" />
           Memuat project…
@@ -324,21 +322,17 @@ export default function ProjectConfigPanel({ projectId }: Props) {
 
   return (
     <>
-      {/* Mobile backdrop: blocks interaction with the chat when the settings
-          sheet is open. Clicking it closes the sheet. The backdrop only
-          shows below md; on desktop the panel is a sticky right rail. */}
+      {/* Tablet/mobile backdrop. At lg+ this panel is a persistent rail. */}
       {mobileOpen && (
         <div
-          className="anim-fade-in fixed inset-0 z-30 bg-[#1A1410]/40 backdrop-blur-sm md:hidden"
+          className="anim-fade-in fixed inset-0 z-30 bg-[#1A1410]/40 backdrop-blur-sm lg:hidden"
           onClick={() => setMobileOpen(false)}
           aria-hidden="true"
         />
       )}
       <aside
-        className={`dark-scroll fixed inset-x-0 bottom-0 z-40 flex max-h-[85vh] shrink-0 flex-col overflow-hidden rounded-t-2xl border-t border-[var(--line)] bg-gradient-to-b from-[var(--paper-2)] to-[var(--paper)] shadow-[0_-8px_32px_-12px_rgba(26,20,16,0.18)] transition-transform duration-300 ease-out md:static md:inset-auto md:max-h-none md:w-[26rem] md:rounded-none md:border-l md:border-t-0 md:shadow-none ${
-          // Mobile: slide up from the bottom when open, hide when closed.
-          // Desktop: always visible (md:translate-y-0).
-          mobileOpen ? "translate-y-0" : "translate-y-full md:translate-y-0"
+        className={`dark-scroll fixed inset-x-0 bottom-0 z-40 flex max-h-[85vh] shrink-0 flex-col overflow-hidden rounded-t-2xl border-t border-[var(--line)] bg-gradient-to-b from-[var(--paper-2)] to-[var(--paper)] shadow-[0_-8px_32px_-12px_rgba(26,20,16,0.18)] transition-transform duration-300 ease-out md:inset-y-0 md:left-auto md:right-0 md:top-0 md:max-h-none md:w-[min(420px,90vw)] md:rounded-none md:border-l md:border-t-0 md:shadow-[var(--shadow-4)] lg:static lg:inset-auto lg:w-[26rem] lg:rounded-none lg:border-l lg:border-t-0 lg:shadow-none ${
+          mobileOpen ? "translate-y-0 md:translate-x-0" : "translate-y-full md:translate-y-0 md:translate-x-full lg:translate-x-0"
         }`}
       >
         {/* Mobile drag handle — purely visual on md+; gives the user a

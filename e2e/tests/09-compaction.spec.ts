@@ -41,8 +41,8 @@ test('multi-turn session produces full transcript', async ({ page }) => {
   await page.goto('/new');
   await page.waitForLoadState('networkidle');
 
-  for (let i = 1; i <= 5; i++) {
-    await fillComposer(page, `Reply with the number ${i}. Just the number.`);
+  for (let i = 1; i <= 12; i++) {
+    await fillComposer(page, i === 1 ? "Remember this exact fact: first-turn token BANANA." : `Reply with the number ${i}. Just the number.`);
     await clickSend(page);
     await waitForReplyDone(page);
   }
@@ -58,4 +58,10 @@ test('multi-turn session produces full transcript', async ({ page }) => {
   for (const a of assistants) {
     expect(a.content.length).toBeGreaterThan(0);
   }
+
+  await fillComposer(page, "What exact token did I ask you to remember in the first turn? Reply with only the token.");
+  await clickSend(page);
+  await waitForReplyDone(page);
+  const after = await apiGet(token, `/api/sessions/${sessionId}/full`);
+  expect(after.messages.at(-1)?.content).toMatch(/BANANA/i);
 });

@@ -28,6 +28,7 @@ import { hashArtifact } from "./artifact-detector.js";
 import { renderMemoryFactsBlock } from "./memory.js";
 import { renderRecalledContextBlock } from "./recalled.js";
 import { renderSessionSummaryBlock } from "./summarized.js";
+import { readArtifactForSession } from "./artifact-context.js";
 import { buildTodayContextBlock } from "./today-context.js";
 import { buildXlsx, buildPdf, buildPptx, safeDocFileName } from "./document-writer.js";
 import db from "./db/index.js";
@@ -242,6 +243,18 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "ReadArtifact",
+      description: "Read a previously published artifact from this chat session when the user refers to its contents.",
+      parameters: {
+        type: "object",
+        properties: { id: { type: "integer", description: "Artifact ID from the session manifest." } },
+        required: ["id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "CreateDocument",
       description:
         "Create a downloadable binary document (xlsx, text PDF, or pptx) " +
@@ -358,6 +371,7 @@ export function runLLM(prompt, opts = {}, onEvent) {
   // the user-prompt prefix and injected here as a <system> block. Resolved
   // by the route handler; empty string when no project or no instructions.
   const projectInstructionsBlock = opts.projectInstructionsBlock || "";
+  const artifactContext = opts.artifactContext || "";
   // Cross-session recall (Phase 3): top-3 snippets from past chats
   // semantically relevant to the current prompt. runLLM is synchronous
   // (returns a controller immediately), so we don't await here — the
@@ -376,7 +390,7 @@ export function runLLM(prompt, opts = {}, onEvent) {
   // Fresh clock each turn so "sekarang" / relative dates stay accurate.
   const nowBlock = buildTodayContextBlock();
   const fullSystemPrompt = (b) =>
-    [nowBlock, memoryBlock, projectMemoryBlock, projectInstructionsBlock, b, summaryBlock]
+    [nowBlock, memoryBlock, projectMemoryBlock, projectInstructionsBlock, artifactContext, b, summaryBlock]
       .filter(Boolean)
       .reduce((acc, block) => acc + "\n\n" + block, systemPrompt);
   const messagesRef = {
@@ -703,6 +717,11 @@ export function runLLM(prompt, opts = {}, onEvent) {
             r = await runSkillTool(tc.name, args, { disabled: disabledSkills });
           } else if (tc.name === "EmitArtifact") {
             r = runEmitArtifact(args, onEvent);
+          } else if (tc.name === "ReadArtifact") {
+            const row = readArtifactForSession(args.id, opts.sessionId, opts.userId);
+            r = row
+              ? { text: row.type === "file" ? `[Binary artifact: ${row.title || "file"}, ${row.file_size || 0} bytes]` : String(row.content || "") }
+              : { error: "artifact not found" };
           } else if (tc.name === "CreateDocument") {
             // Operator log only — don't use stderr (FE surfaces stderr as error banner).
             process.stderr.write(

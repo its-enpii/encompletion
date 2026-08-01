@@ -873,22 +873,37 @@ export default function Chat({
     return () => clearInterval(poll);
   }, [streaming, sessionId]);
 
-  // Auto-scroll to the newest message whenever the list grows or content
-  // streams in. We only auto-scroll if the user is already near the bottom
-  // (within ~80px) — if they've scrolled up to read older messages, leave
-  // them alone and surface the jump-to-bottom button instead.
+  // Track whether the user is currently near the bottom. Updated by the
+  // scroll listener below. We only auto-scroll when the user is already
+  // pinned to the bottom — if they've scrolled up to read older messages,
+  // leave them alone and surface the jump-to-bottom button. Tying the
+  // auto-scroll to `streaming` (as the previous version did) made the
+  // chat snap back to the latest token mid-stream, even when the user
+  // had intentionally scrolled up to re-read earlier turns.
+  const pinnedToBottomRef = useRef(true);
   useEffect(() => {
     const el = mainScrollRef.current;
     if (!el) return;
-    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    const shouldPin = streaming || distFromBottom < 80;
-    if (!shouldPin) return;
+    const onUserScroll = () => {
+      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      pinnedToBottomRef.current = distFromBottom < 80;
+    };
+    el.addEventListener("scroll", onUserScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onUserScroll);
+  }, []);
+
+  // Auto-scroll to the newest message whenever the list grows or content
+  // streams in. We only auto-scroll if the user is already near the
+  // bottom (within ~80px) — if they've scrolled up to read older
+  // messages, leave them alone and surface the jump-to-bottom button.
+  useEffect(() => {
+    if (!pinnedToBottomRef.current) return;
     scrollToBottom();
-    // Intentionally only depend on messages.length so each text delta
-    // triggers a re-scroll. message_saved id swaps don't change length
-    // so they're a no-op here.
+    // Only re-scroll when the list length changes (each text delta
+    // appends and so bumps length). Re-renders for unrelated state
+    // (typing pill, info banner) don't change length and are a no-op.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages.length, streaming]);
+  }, [messages.length]);
 
   function scrollToBottom() {
     requestAnimationFrame(() => {
@@ -1335,7 +1350,7 @@ export default function Chat({
   );
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:flex-row">
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden lg:flex-row">
       {chatColumn}
       {showArtifactPanel && (
         <ArtifactPanel

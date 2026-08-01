@@ -273,7 +273,7 @@ export function ChatHeader({
             )}
           </button>
         )}
-        <div className="hidden sm:block">
+        <div className="hidden lg:block">
           <SelectPill
             label="Model"
             value={model}
@@ -286,7 +286,7 @@ export function ChatHeader({
           />
         </div>
         {/* Mobile model: compact select */}
-        <label className="relative sm:hidden">
+        <label className="relative lg:hidden">
           <span className="sr-only">Model</span>
           <select
             value={model}

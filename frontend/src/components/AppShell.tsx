@@ -42,13 +42,21 @@ export function AppShell({
   // to decide whether to collapse labels, so leaking a desktop `mini` into
   // a mobile layout would shrink the rail to icon-only and break touch UX.
   const [isDesktop, setIsDesktop] = useState(true);
+  const [isWide, setIsWide] = useState(true);
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const mql = window.matchMedia("(min-width: 768px)");
-    setIsDesktop(mql.matches);
-    function onChange(e: MediaQueryListEvent) { setIsDesktop(e.matches); }
-    mql.addEventListener("change", onChange);
-    return () => mql.removeEventListener("change", onChange);
+    const desktop = window.matchMedia("(min-width: 768px)");
+    const wide = window.matchMedia("(min-width: 1024px)");
+    setIsDesktop(desktop.matches);
+    setIsWide(wide.matches);
+    function onDesktopChange(e: MediaQueryListEvent) { setIsDesktop(e.matches); }
+    function onWideChange(e: MediaQueryListEvent) { setIsWide(e.matches); }
+    desktop.addEventListener("change", onDesktopChange);
+    wide.addEventListener("change", onWideChange);
+    return () => {
+      desktop.removeEventListener("change", onDesktopChange);
+      wide.removeEventListener("change", onWideChange);
+    };
   }, []);
 
   // Restore persisted mode on mount. Falls back to "full" on missing/corrupt.
@@ -72,7 +80,7 @@ export function AppShell({
   // Effective mode for rendering. The mobile rail is always "full" because
   // there's no horizontal room for the icon-only mini rail — touch targets
   // need labels. The persisted `mode` only matters on desktop.
-  const renderMode: SidebarMode = !isDesktop ? "full" : mode;
+  const renderMode: SidebarMode = !isDesktop ? "full" : (!isWide && mode === "full" ? "mini" : mode);
 
   // Cycle full ↔ mini. "hidden" is reachable through dedicated events
   // (app:hide-sidebar, app:show-sidebar) rather than this button, so a
