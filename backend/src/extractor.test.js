@@ -55,6 +55,20 @@ test('valid JSON facts are parsed and sanitized', async () => {
   assert.deepEqual(out[1], { key: "role", value: "senior engineer" });
 });
 
+test('project scope uses project-fact extraction prompt', async () => {
+  let system = '';
+  _setExtractorLLMForTests(async (input) => {
+    system = input.system;
+    return '{"facts":[]}';
+  });
+  await extractFactsFromTranscript([
+    { role: 'user', content: 'Project uses Postgres.' },
+    { role: 'assistant', content: 'Noted.' },
+  ], { scope: 'project' });
+  assert.match(system, /persistent project facts/);
+  assert.doesNotMatch(system, /persistent user facts/);
+});
+
 test('```json fenced output is still parsed', async () => {
   _setExtractorLLMForTests(async () =>
     "Here you go:\n```json\n" + JSON.stringify({ facts: [{ key: "lang", value: "id" }] }) + "\n```\nDone."

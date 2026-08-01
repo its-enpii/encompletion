@@ -64,6 +64,37 @@ test('index/query round-trip with project_knowledge', { concurrency: false }, as
   rag.removeSource('project_knowledge', id);
 });
 
+test('project scope excludes knowledge from other projects', { concurrency: false }, async () => {
+  const admin = db.prepare(`SELECT id FROM users WHERE username = 'admin'`).get();
+  const projectA = db.prepare(
+    `INSERT INTO projects (user_id, name) VALUES (?, '__rag_project_a__')`
+  ).run(admin.id).lastInsertRowid;
+  const projectB = db.prepare(
+    `INSERT INTO projects (user_id, name) VALUES (?, '__rag_project_b__')`
+  ).run(admin.id).lastInsertRowid;
+  const knowledgeA = db.prepare(
+    `INSERT INTO project_knowledge (project_id, title, type, content) VALUES (?, 'A', 'text', ?)`
+  ).run(projectA, 'project alpha secret phrase').lastInsertRowid;
+  const knowledgeB = db.prepare(
+    `INSERT INTO project_knowledge (project_id, title, type, content) VALUES (?, 'B', 'text', ?)`
+  ).run(projectB, 'project beta secret phrase').lastInsertRowid;
+
+  await rag.indexSource({ kind: 'project_knowledge', id: knowledgeA, content: 'project alpha secret phrase' });
+  await rag.indexSource({ kind: 'project_knowledge', id: knowledgeB, content: 'project beta secret phrase' });
+  const hits = await rag.query('secret phrase', {
+    scopeUserId: admin.id,
+    projectId: projectA,
+    topK: 10,
+  });
+
+  assert.ok(hits.some((hit) => hit.source_id === knowledgeA));
+  assert.ok(!hits.some((hit) => hit.source_id === knowledgeB));
+
+  rag.removeSource('project_knowledge', knowledgeA);
+  rag.removeSource('project_knowledge', knowledgeB);
+  db.prepare('DELETE FROM projects WHERE id IN (?, ?)').run(projectA, projectB);
+});
+
 test('attachment is ephemeral per session', { concurrency: false }, async () => {
   const id = newSourceId();
   const sessionA = newSessionId();

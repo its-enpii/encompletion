@@ -31,22 +31,21 @@ function compose(opts) {
   return blocks.reduce((acc, b) => acc + '\n\n' + b, systemPrompt);
 }
 
-test('projectInstructionsBlock slots between projectMemoryBlock and recalled', () => {
+test('project chat composes project memory without user memory', () => {
   const out = compose({
-    memoryBlock: 'USER_FACTS',
+    memoryBlock: '',
     projectMemoryBlock: 'PROJECT_FACTS',
     projectInstructionsBlock: 'PROJECT_INSTRUCTIONS',
     recalled: 'RECALLED',
     summaryBlock: 'SUMMARY',
   });
-  const u = out.indexOf('USER_FACTS');
   const f = out.indexOf('PROJECT_FACTS');
   const i = out.indexOf('PROJECT_INSTRUCTIONS');
   const r = out.indexOf('RECALLED');
   const s = out.indexOf('SUMMARY');
   const p = out.indexOf('BASE_PERSONA');
-  assert.ok(p >= 0 && u > p && f > u && i > f && r > i && s > r,
-    `order base<user<facts<instr<recall<summary, got: ${out}`);
+  assert.ok(p >= 0 && !out.includes('USER_FACTS') && f > p && i > f && r > i && s > r,
+    `project memory must not include user facts, got: ${out}`);
 });
 
 test('empty projectInstructionsBlock is dropped by the reducer', () => {

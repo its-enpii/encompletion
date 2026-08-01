@@ -157,7 +157,13 @@ export default function Sidebar({
     }
   }
 
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [refreshKey]);
+  // The sidebar stays mounted across navigation. Reload when the route scope
+  // changes, otherwise a project page reuses the previous standalone list
+  // (and vice versa) until another refresh event happens.
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey, pathname]);
 
   // Cross-component refresh: Chat (and any other component) dispatches
   // `app:sessions-changed` after creating a new session or persisting a

@@ -138,6 +138,7 @@ async function buildFinalPromptWithRag({ dbSession, prompt, userMsgId, attachmen
   try {
     hits = await rag.query(prompt, {
       scopeUserId: reqUserId,
+      projectId: dbSession.project_id ?? null,
       sessionId: dbSession.id,
     });
   } catch (e) {

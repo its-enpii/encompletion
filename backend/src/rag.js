@@ -166,10 +166,17 @@ function enforceDim(incomingDim) {
  *
  * scopeUserId: limits to chunks the user can see. project_knowledge rows
  *   are filtered through the projects table; admin bypasses.
+ * projectId (optional): when supplied, project knowledge and recalled
+ * messages are restricted to that project; null means projectless only.
  * sessionId (optional): when set, attachment chunks are only returned
  *   if they were uploaded into this session (ephemeral recall).
  */
-export async function query(text, { topK = TOPK_DEFAULT, scopeUserId = null, sessionId = null } = {}) {
+export async function query(text, {
+  topK = TOPK_DEFAULT,
+  scopeUserId = null,
+  projectId,
+  sessionId = null,
+} = {}) {
   if (!text || typeof text !== 'string' || text.trim().length === 0) return [];
   if (activeDim == null) {
     const { dim } = await embed([text]);
@@ -186,7 +193,7 @@ export async function query(text, { topK = TOPK_DEFAULT, scopeUserId = null, ses
   if (!queryVec) return [];
 
   // Pull candidate chunks, narrowed by scope at SQL level.
-  const rows = loadCandidateChunks({ scopeUserId, sessionId });
+  const rows = loadCandidateChunks({ scopeUserId, projectId, sessionId });
   if (rows.length === 0) return [];
 
   const scored = [];
@@ -212,14 +219,27 @@ export async function query(text, { topK = TOPK_DEFAULT, scopeUserId = null, ses
   }));
 }
 
-function loadCandidateChunks({ scopeUserId, sessionId }) {
+function loadCandidateChunks({ scopeUserId, projectId, sessionId }) {
   // Three shapes: project_knowledge, attachment, user_message. Each
   // joined to a different owner table. We accumulate into one array
   // and post-filter for session-exclusion below.
   // Each SELECT includes c.id so the session post-filter can drop rows
   // belonging to the current session (cross-session recall only).
   const out = [];
-  if (scopeUserId != null) {
+  if (projectId !== undefined) {
+    const projectFilter = projectId == null ? 'p.id IS NULL' : 'p.id = ?';
+    const params = projectId == null ? [] : [Number(projectId)];
+    const r = db.prepare(
+      `SELECT c.id, c.source_kind, c.source_id, c.chunk_index, c.content, c.vec
+         FROM embeddings_chunk c
+         JOIN project_knowledge k ON k.id = c.source_id
+         JOIN projects p ON p.id = k.project_id
+        WHERE c.source_kind = 'project_knowledge'
+          AND ${projectFilter}
+          AND p.archived_at IS NULL`
+    ).all(...params);
+    out.push(...r);
+  } else if (scopeUserId != null) {
     const admin = isAdmin(scopeUserId);
     if (admin) {
       const r = db.prepare(
@@ -279,23 +299,37 @@ function loadCandidateChunks({ scopeUserId, sessionId }) {
   // the per-user filter for debugging.
   if (scopeUserId != null) {
     if (isAdmin(scopeUserId)) {
+      const projectFilter = projectId === undefined
+        ? ''
+        : projectId == null ? ' AND s.project_id IS NULL' : ' AND s.project_id = ?';
+      const params = projectId == null || projectId === undefined ? [] : [Number(projectId)];
       const r = db.prepare(
         `SELECT c.id, c.source_kind, c.source_id, c.chunk_index, c.content, c.vec
            FROM embeddings_chunk c
-           WHERE c.source_kind = 'user_message'`
-      ).all();
+           JOIN embeddings_session es ON es.chunk_id = c.id
+           JOIN sessions s ON s.id = es.session_id
+           WHERE c.source_kind = 'user_message'
+             ${projectFilter}`
+      ).all(...params);
       out.push(...r);
     } else {
       // messages doesn't carry user_id; hop via sessions.user_id.
       // Index on embeddings_session(session_id) covers the join.
+      const projectFilter = projectId === undefined
+        ? ''
+        : projectId == null ? ' AND s.project_id IS NULL' : ' AND s.project_id = ?';
+      const params = projectId == null || projectId === undefined
+        ? [Number(scopeUserId)]
+        : [Number(projectId), Number(scopeUserId)];
       const r = db.prepare(
         `SELECT c.id, c.source_kind, c.source_id, c.chunk_index, c.content, c.vec
            FROM embeddings_chunk c
            JOIN embeddings_session es ON es.chunk_id = c.id
            JOIN sessions s ON s.id = es.session_id
           WHERE c.source_kind = 'user_message'
+            ${projectFilter}
             AND s.user_id = ?`
-      ).all(Number(scopeUserId));
+      ).all(...params);
       out.push(...r);
     }
   }
