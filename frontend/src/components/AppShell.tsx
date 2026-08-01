@@ -35,28 +35,20 @@ export function AppShell({
   const pathname = usePathname();
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [mode, setModeRaw] = useState<SidebarMode>("full");
+const [mode, setModeRaw] = useState<SidebarMode>("full");
 
   // Track viewport so we don't push a desktop mode (mini / hidden) onto
   // a mobile render — the inner Sidebar's content uses the persisted mode
   // to decide whether to collapse labels, so leaking a desktop `mini` into
   // a mobile layout would shrink the rail to icon-only and break touch UX.
   const [isDesktop, setIsDesktop] = useState(true);
-  const [isWide, setIsWide] = useState(true);
   useEffect(() => {
     if (typeof window === "undefined") return;
     const desktop = window.matchMedia("(min-width: 768px)");
-    const wide = window.matchMedia("(min-width: 1280px)");
     setIsDesktop(desktop.matches);
-    setIsWide(wide.matches);
     function onDesktopChange(e: MediaQueryListEvent) { setIsDesktop(e.matches); }
-    function onWideChange(e: MediaQueryListEvent) { setIsWide(e.matches); }
     desktop.addEventListener("change", onDesktopChange);
-    wide.addEventListener("change", onWideChange);
-    return () => {
-      desktop.removeEventListener("change", onDesktopChange);
-      wide.removeEventListener("change", onWideChange);
-    };
+    return () => desktop.removeEventListener("change", onDesktopChange);
   }, []);
 
   // Restore persisted mode on mount. Falls back to "full" on missing/corrupt.
@@ -77,17 +69,14 @@ export function AppShell({
     }
   }, []);
 
-  // Effective mode for rendering. The mobile rail is always "full" because
-  // there's no horizontal room for the icon-only mini rail — touch targets
-  // need labels. The persisted `mode` only matters on desktop.
   // Effective mode for rendering.
-  //   - mobile (<768): always "full" so the drawer has real labels.
-  //   - tablet (768-1279): always "full" — collapsing to a 64px icon rail
-  //     squeezes the chat column too much on common tablet widths
-  //     (800-1024) and leaves no way to surface the session list.
-  //   - xl+: honor the persisted mode (full/mini/hidden) so the user
-  //     can collapse the rail when they need a wider chat.
-  const renderMode: SidebarMode = isWide ? mode : "full";
+  //   - mobile (<768): always "full" so the drawer has real labels and
+  //     no icon-only rail tricks the user into thinking the sidebar is
+  //     broken.
+  //   - tablet/desktop (≥768): honor the persisted mode (full/mini/
+  //     hidden) so the user can collapse the rail when they want more
+  //     chat width.
+  const renderMode: SidebarMode = isDesktop ? mode : "full";
 
   // Cycle full ↔ mini. "hidden" is reachable through dedicated events
   // (app:hide-sidebar, app:show-sidebar) rather than this button, so a
@@ -114,8 +103,19 @@ export function AppShell({
   const activeSessionId = chatMatch ? Number(chatMatch[1]) : null;
 
   useEffect(() => {
-    function open() { setSidebarOpen(true); }
-    function closeDrawer() { setSidebarOpen(false); }
+    // Mobile: header hamburger opens the drawer overlay.
+    // Tablet/desktop: header hamburger toggles the rail between visible
+    // and hidden so the chat gets more room without a temporary
+    // overlay. The cycle button inside the sidebar still toggles
+    // full↔mini↔hidden for users who want fine control.
+    function open() {
+      if (isDesktop) setMode(mode === "hidden" ? "full" : "hidden");
+      else setSidebarOpen(true);
+    }
+    function closeDrawer() {
+      if (isDesktop) setMode("hidden");
+      else setSidebarOpen(false);
+    }
     function cycle() { cycleMode(); }
     function showSidebar() { setMode("full"); }
     function hideSidebar() { setMode("hidden"); }
@@ -131,7 +131,7 @@ export function AppShell({
       window.removeEventListener("app:show-sidebar", showSidebar);
       window.removeEventListener("app:hide-sidebar", hideSidebar);
     };
-  }, [cycleMode, setMode]);
+  }, [cycleMode, setMode, isDesktop, mode]);
 
   // Close mobile drawer whenever route changes.
   useEffect(() => {

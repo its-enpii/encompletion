@@ -424,9 +424,10 @@ className={`fixed inset-y-0 left-0 z-40 flex min-w-0 flex-col border-r border-[v
             ? "translate-x-0"
             : "-translate-x-full"
         } ${
-          // Desktop only: hidden mode slides the rail off-screen. The
-          // `md:` prefix keeps the mobile state independent of `mode` —
-          // the rail is hidden on mobile purely via the drawer translate.
+          // Hidden mode slides the rail off-screen at tablet (≥768) and
+          // above. Mobile visibility is driven purely by the drawer
+          // translate above so the hamburger events don't fight the
+          // local open state.
           isHidden
             ? "md:-translate-x-full md:opacity-0 md:pointer-events-none md:shadow-none"
             : "md:translate-x-0 md:opacity-100"
