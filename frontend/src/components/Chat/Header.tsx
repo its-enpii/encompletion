@@ -40,59 +40,9 @@ export function ChatHeader({
   const pathname = usePathname();
   const onProjectRoute =
     pathname != null && /^\/projects\/\d+(\/.*)?$/.test(pathname);
-  // Track the sidebar's persisted mode so we can show the "show sidebar"
-  // button on desktop only when the rail is currently off-screen. The
-  // actual state lives in AppShell; we mirror it here via localStorage +
-  // the same custom events that AppShell uses to mutate it. Cheaper than
-  // threading the prop through every Chat consumer.
-  //
-  // We also gate by viewport — the "show sidebar" button is desktop-only.
-  // On mobile the drawer is the user-facing concept; there's no hidden
-  // mode to recover from (the hamburger toggles the drawer directly).
-  const [sidebarHidden, setSidebarHidden] = useState(false);
-  const [isDesktop, setIsDesktop] = useState(true);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const mql = window.matchMedia("(min-width: 768px)");
-    setIsDesktop(mql.matches);
-    function onMql(e: MediaQueryListEvent) { setIsDesktop(e.matches); }
-    mql.addEventListener("change", onMql);
-    try {
-      setSidebarHidden(
-        window.localStorage.getItem("app-shell:sidebar-mode") === "hidden"
-      );
-    } catch {
-      /* localStorage may be blocked — keep false */
-    }
-    function onChange() {
-      try {
-        setSidebarHidden(
-          window.localStorage.getItem("app-shell:sidebar-mode") === "hidden"
-        );
-      } catch {
-        /* ignore */
-      }
-    }
-    window.addEventListener("app:show-sidebar", onChange);
-    window.addEventListener("app:hide-sidebar", onChange);
-    window.addEventListener("app:cycle-sidebar", onChange);
-    return () => {
-      mql.removeEventListener("change", onMql);
-      window.removeEventListener("app:show-sidebar", onChange);
-      window.removeEventListener("app:hide-sidebar", onChange);
-      window.removeEventListener("app:cycle-sidebar", onChange);
-    };
-  }, []);
-
   function openSidebar() {
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("app:open-sidebar"));
-    }
-  }
-  function showSidebar() {
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("app:show-sidebar"));
     }
   }
   function toggleProjectSettings() {
@@ -103,42 +53,17 @@ export function ChatHeader({
 
   return (
     <header className="z-10 flex h-16 shrink-0 items-center gap-3 border-b border-[var(--line)] bg-[var(--paper)]/80 px-4 backdrop-blur-xl">
-      {/* Hamburger toggle. Visible below xl so the user can bring the
-          full sidebar drawer up over the mini rail that AppShell renders
-          between md and xl. Above xl the sidebar already lives in full
-          or mini mode; cycling it lives on the sidebar itself. */}
       <button
         type="button"
         onClick={openSidebar}
-        aria-label="Open sidebar"
-        className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--paper-2)] text-[var(--ink-2)] shadow-[var(--shadow-1)] transition-all duration-200 hover:border-[var(--magenta-500)]/40 hover:bg-[var(--paper-3)] hover:text-[var(--magenta-700)] xl:hidden"
-      >
+        aria-label="Toggle sidebar"
+        className="grid h-11 w-11 shrink-0 place-items-center rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--paper-2)] text-[var(--ink-2)] shadow-[var(--shadow-1)] transition-all duration-200 hover:border-[var(--magenta-500)]/40 hover:bg-[var(--paper-3)] hover:text-[var(--magenta-700)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--magenta-500)]/40" >
         <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
           <line x1="4" y1="6" x2="20" y2="6" />
           <line x1="4" y1="12" x2="20" y2="12" />
           <line x1="4" y1="18" x2="20" y2="18" />
         </svg>
       </button>
-
-      {/* Desktop "show sidebar" — only when the rail is currently in the
-          "hidden" mode. Companion to the sidebar's collapse-to-hidden path
-          so the user can always bring the rail back without a keyboard
-          shortcut. Conditional on `sidebarHidden` so it's invisible while
-          the rail is in full or mini mode. */}
-      {sidebarHidden && (
-        <button
-          type="button"
-          onClick={showSidebar}
-          aria-label="Show sidebar"
-          title="Tampilkan sidebar"
-          className="hidden h-9 w-9 shrink-0 place-items-center rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--paper-2)] text-[var(--ink-2)] shadow-[var(--shadow-1)] transition-all duration-200 hover:border-[var(--magenta-500)]/40 hover:bg-[var(--paper-3)] hover:text-[var(--magenta-700)] md:grid"
-        >
-          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="4" width="18" height="16" rx="2" />
-            <line x1="9" y1="4" x2="9" y2="20" />
-          </svg>
-        </button>
-      )}
 
       {/* Title block */}
       <div className="flex min-w-0 flex-1 items-center gap-2">
