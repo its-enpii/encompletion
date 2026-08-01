@@ -48,11 +48,12 @@ jobs:
           # Passed to the remote shell only when listed in `envs` below.
           # appleboy/ssh-action does not forward step env automatically.
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          GIT_SHA: ${{ github.sha }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          envs: DEPLOY_PATH
+          envs: DEPLOY_PATH,GIT_SHA
           script: |
             set -euo pipefail
             : "${DEPLOY_PATH:?DEPLOY_PATH must be set}"
@@ -60,7 +61,11 @@ jobs:
             git fetch --prune origin
             git reset --hard origin/main
             docker compose pull || true
-            docker compose up -d --build
+            # Pass the commit SHA into the frontend image so /build.txt
+            # carries a per-deploy stamp that VersionWatcher can detect.
+            GIT_SHA="${GIT_SHA:-local}" docker compose build frontend
+            docker compose up -d --force-recreate frontend
+            docker compose up -d backend nginx
             docker image prune -f
             docker compose ps
 

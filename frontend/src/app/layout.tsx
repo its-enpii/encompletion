@@ -5,6 +5,7 @@ import { AuthProvider } from "@/lib/auth";
 import AuthGate from "@/components/AuthGate";
 import UiProvider from "@/components/ui/UiProvider";
 import { ModelsProvider } from "@/lib/models";
+import { VersionWatcher } from "@/components/VersionWatcher";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -31,6 +32,7 @@ export default function RootLayout({
   return (
     <html lang="id" className={`${inter.variable} ${jetbrains.variable} h-full overflow-hidden antialiased`}>
       <body className="flex h-full min-h-0 flex-col overflow-hidden">
+        <VersionWatcher />
         <AuthProvider>
           <UiProvider>
             <ModelsProvider>
