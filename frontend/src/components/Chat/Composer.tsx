@@ -127,8 +127,11 @@ export function Composer({
               value={value}
               onChange={(e) => onChange(e.target.value)}
               onKeyDown={(e) => {
-                const mobile = typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
-                if (e.key === "Enter" && !e.shiftKey && !mobile) {
+                const touchInput = typeof window !== "undefined" && (
+                  window.matchMedia("(pointer: coarse)").matches ||
+                  window.navigator.maxTouchPoints > 0
+                );
+                if (e.key === "Enter" && !e.shiftKey && !touchInput) {
                   e.preventDefault();
                   if (canSend) onSend();
                 }

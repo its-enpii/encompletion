@@ -737,8 +737,6 @@ export default function Chat({
           if (art?.id != null && cur.some((x) => x.id === art.id)) return cur;
           return [...cur, art as Artifact];
         });
-        // Open side panel so user sees the deliverable.
-        setShowArtifactPanel(true);
         // Prefer message_id from payload/art; never treat artifact id as msg key.
         const targetMsgId = payload.message_id ?? art?.message_id ?? null;
         setArtifactsByMsg((cur) => {
