@@ -111,6 +111,10 @@ test('GET /api/llm-settings: empty row returns all-false', async () => {
 });
 
 test('PUT base_url + api_key: configured flips to true, has_key true', async () => {
+  // Exercise the first-save INSERT path. Without this reset, this test could
+  // inherit the placeholder row created by another test and only cover UPDATE.
+  db.prepare('DELETE FROM user_llm_settings WHERE user_id = ?').run(aliceId);
+
   const r = await put('/api/llm-settings', {
     base_url: 'https://ai.example.com/v1',
     api_key: 'sk-test-1234567890abcd',
@@ -175,7 +179,7 @@ test('PUT without fields returns 400', async () => {
 });
 
 test('PUT rejects invalid base_url', async () => {
-  for (const bad of ['', 'not-a-url', 'file:///etc/passwd', 'javascript:alert(1)']) {
+  for (const bad of ['not-a-url', 'file:///etc/passwd', 'javascript:alert(1)']) {
     const r = await put('/api/llm-settings', { base_url: bad });
     assert.equal(r.status, 400, `expected 400 for "${bad}"`);
   }

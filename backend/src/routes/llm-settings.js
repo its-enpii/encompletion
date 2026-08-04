@@ -103,7 +103,7 @@ router.get('/', requireAuth, async (req, res) => {
   res.json(publicView(row));
 });
 
-router.put('/', requireAuth, async (req, res) => {
+router.put('/', requireAuth, (req, res) => {
   const body = req.body || {};
   const updates = [];
   const params = [];
@@ -160,20 +160,20 @@ router.put('/', requireAuth, async (req, res) => {
     .prepare('SELECT user_id FROM user_llm_settings WHERE user_id = ?')
     .get(req.user.id);
 
-  if (existing) {
-    updates.push('updated_at = CURRENT_TIMESTAMP');
+  if (!existing) {
+    // Create the first-row placeholder, then use the same UPDATE path as all
+    // subsequent saves. UPDATE assignments such as `base_url = ?` are not
+    // valid in an INSERT column list; reusing them there previously crashed
+    // first-time onboarding before Express could send a response.
     db.prepare(
-      `UPDATE user_llm_settings SET ${updates.join(', ')} WHERE user_id = ?`
-    ).run(...params, req.user.id);
-  } else {
-    // First save. base_url + api_key may both be absent; that's fine —
-    // the row just exists as a placeholder.
-    const setsSql = updates.length ? updates.join(', ') + ', ' : '';
-    db.prepare(
-      `INSERT INTO user_llm_settings (user_id, ${setsSql}updated_at)
-       VALUES (?, ${params.map(() => '?').join(', ')}, CURRENT_TIMESTAMP)`
-    ).run(req.user.id, ...params);
+      'INSERT INTO user_llm_settings (user_id) VALUES (?)'
+    ).run(req.user.id);
   }
+
+  updates.push('updated_at = CURRENT_TIMESTAMP');
+  db.prepare(
+    `UPDATE user_llm_settings SET ${updates.join(', ')} WHERE user_id = ?`
+  ).run(...params, req.user.id);
 
   const row = readSettingsRow(req.user.id);
   res.json(publicView(row));
