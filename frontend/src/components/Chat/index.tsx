@@ -1432,6 +1432,11 @@ export default function Chat({
         onToggleArtifacts={() => setShowArtifactPanel(!showArtifactPanel)}
         needsLlmSetup={!chatReady}
         onOpenLlmSettings={openLlmSettings}
+        llmSetupReason={!llm.configured
+          ? "Set up AI"
+          : modelOptions.length === 0
+            ? "Impor model"
+            : undefined}
       />
 
       <MessageList

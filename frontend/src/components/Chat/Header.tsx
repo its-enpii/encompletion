@@ -19,6 +19,9 @@ export function ChatHeader({
   artifactCount = 0,
   artifactPanelOpen = false,
   onToggleArtifacts,
+  needsLlmSetup = false,
+  onOpenLlmSettings,
+  llmSetupReason,
 }: {
   activeSession: Session | null;
   project: Project | null;
@@ -30,6 +33,22 @@ export function ChatHeader({
   artifactCount?: number;
   artifactPanelOpen?: boolean;
   onToggleArtifacts?: () => void;
+  /**
+   * True when the user has no LLM provider configured OR has no
+   * imported models yet. Mirrors `chatReady` in Chat/index.tsx so the
+   * header surfaces the same nudge as the Composer (which disables
+   * the Send button + shows an inline hint). Renders a clickable
+   * warning pill in the title block that bounces to the AI Settings
+   * dialog.
+   */
+  needsLlmSetup?: boolean;
+  onOpenLlmSettings?: () => void;
+  /**
+   * Short label for the warning pill. Same vocabulary as the
+   * Composer's `disabledReason` ("Set up AI" / "Impor model"). Falls
+   * back to "Set up AI" when omitted so callers can stay terse.
+   */
+  llmSetupReason?: string;
 }) {
   const [modelOpen, setModelOpen] = useState(false);
   // Whether the project pill should toggle the in-page settings panel
@@ -138,6 +157,26 @@ export function ChatHeader({
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--warning)]" />
             <span>no heartbeat</span>
           </Pill>
+        )}
+        {needsLlmSetup && (
+          // Mirrors the Composer gate — clickable so users have a
+          // discoverable path to AI Settings from the header even when
+          // the Send button is the only visible affordance. Label
+          // adapts: no provider → "Set up AI"; provider but no models
+          // → "Impor model".
+          <button
+            type="button"
+            onClick={() => onOpenLlmSettings?.()}
+            title="Buka AI Settings"
+            aria-label="Buka AI Settings"
+            className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] transition-colors hover:bg-[var(--paper-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--warning)]/40"
+          >
+            <Pill tone="warning">
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--warning)]" />
+              <span>{llmSetupReason ?? "Set up AI"}</span>
+              <span aria-hidden="true">→</span>
+            </Pill>
+          </button>
         )}
       </div>
 
