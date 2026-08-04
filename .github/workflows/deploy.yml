@@ -72,6 +72,14 @@ jobs:
             GIT_SHA="${GIT_SHA:-local}" docker compose build backend
             docker compose up -d --force-recreate backend frontend
             docker compose up -d nginx
+            # nginx resolves Compose service names when its config is loaded.
+            # Backend recreation gives `backend` a new container IP, so keeping
+            # nginx running without a reload can leave it proxying to the dead
+            # address and return 502 even though the new backend is healthy.
+            # A graceful reload refreshes DNS without replacing nginx itself
+            # (replacing it could likewise stale the outer proxy's nginx IP).
+            docker compose exec -T nginx nginx -t
+            docker compose exec -T nginx nginx -s reload
             docker image prune -f
             docker compose ps
 
