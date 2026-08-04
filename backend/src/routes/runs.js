@@ -31,6 +31,18 @@ const router = express.Router();
 // short-lived ?ticket= without forcing the long-lived JWT into the URL.
 
 const MAX_KNOWLEDGE_BYTES = 512 * 1024;
+const WORKDIR_ROOT = process.env.WORKDIR_ROOT
+  ? path.resolve(process.cwd(), process.env.WORKDIR_ROOT)
+  : path.resolve(process.cwd(), 'storage/workdirs');
+fs.mkdirSync(WORKDIR_ROOT, { recursive: true });
+
+function defaultRunWorkdir(userId, sessionId) {
+  return path.join(WORKDIR_ROOT, String(userId), `session-${sessionId}`);
+}
+
+function legacyRunWorkdir(userId) {
+  return path.join(WORKDIR_ROOT, String(userId));
+}
 
 /**
  * Build the final prompt string from session context, project knowledge,
@@ -449,6 +461,15 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
     dbSession = db.prepare('SELECT * FROM sessions WHERE id = ?').get(info.lastInsertRowid);
   }
 
+  const usesLegacySharedWorkdir = dbSession.workdir
+    && path.resolve(dbSession.workdir) === path.resolve(legacyRunWorkdir(req.user.id));
+  if (!dbSession.workdir || usesLegacySharedWorkdir) {
+    const workdir = defaultRunWorkdir(req.user.id, dbSession.id);
+    fs.mkdirSync(workdir, { recursive: true });
+    db.prepare('UPDATE sessions SET workdir = ? WHERE id = ?').run(workdir, dbSession.id);
+    dbSession = { ...dbSession, workdir };
+  }
+
   // Persist user message. For regenerations reuse the existing row.
   let userMsgId;
   if (regenerate) {
@@ -623,7 +644,7 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
   // Resolve cwd for tool execution. Falls back to the backend's process
   // cwd if the session doesn't have a workdir set — preserves the
   // pre-workdir behavior for existing sessions.
-  let runCwd = process.cwd();
+  let runCwd = dbSession.workdir;
   if (dbSession.workdir) {
     try {
       fs.mkdirSync(dbSession.workdir, { recursive: true });
@@ -853,6 +874,13 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
            WHERE session_id = ? AND content_hash = ?
            ORDER BY id ASC LIMIT 1`
       );
+      const findPreviousVersionStmt = db.prepare(
+        `SELECT id, version
+           FROM artifacts
+          WHERE session_id = ? AND LOWER(COALESCE(title, '')) = LOWER(?)
+            AND (dup_of IS NULL OR dup_of = 0)
+          ORDER BY version DESC, id DESC LIMIT 1`
+      );
       for (const art of pendingToolArtifacts) {
         if (!art.content && !art.file_path) continue;
         const existing = art.content_hash
@@ -876,15 +904,20 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
           });
           continue;
         }
+        const previousVersion = art.title
+          ? findPreviousVersionStmt.get(dbSession.id, art.title)
+          : null;
+        const version = previousVersion ? Number(previousVersion.version || 1) + 1 : 1;
         const insert = db.prepare(
           `INSERT INTO artifacts
              (session_id, message_id, type, language, title, content,
               version, content_hash, dup_of, file_path, mime_type, file_size)
-           VALUES (?, ?, ?, ?, ?, ?, 1, ?, NULL, ?, ?, ?)`
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`
         ).run(
           dbSession.id, activeMsgId,
           art.type || 'code', art.language || null,
           art.title || 'Artifact', art.content || '',
+          version,
           art.content_hash || null,
           art.file_path || null, art.mime_type || null, art.file_size || null
         );
@@ -904,7 +937,7 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
           file_path: art.file_path || null,
           mime_type: art.mime_type || null,
           file_size: art.file_size || null,
-          version: 1,
+          version,
           source: 'tool',
         });
       }

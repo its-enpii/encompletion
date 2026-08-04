@@ -24,13 +24,21 @@ export default function ArtifactPanel({ artifacts, sessionId, onClose }: Props) 
   const [activeIdx, setActiveIdx] = useState(0);
   const [zipBusy, setZipBusy] = useState(false);
   const [zipError, setZipError] = useState<string | null>(null);
+  const responseMessageIds = new Set(
+    artifacts
+      .map((artifact) => artifact.message_id)
+      .filter((messageId): messageId is number => messageId != null),
+  );
+  const isSingleResponse = responseMessageIds.size === 1 && artifacts.every((artifact) => artifact.message_id != null);
+  const canDownloadZip = sessionId != null && artifacts.length > 1 && isSingleResponse;
 
   async function downloadZip() {
-    if (sessionId == null || artifacts.length === 0 || zipBusy) return;
+    if (!canDownloadZip || zipBusy) return;
     setZipBusy(true);
     setZipError(null);
     try {
-      const r = await authFetch(`/api/sessions/${sessionId}/artifacts.zip`);
+      const ids = artifacts.map((artifact) => artifact.id).join(",");
+      const r = await authFetch(`/api/sessions/${sessionId}/artifacts.zip?ids=${encodeURIComponent(ids)}`);
       if (!r.ok) {
         const err = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
         throw new Error(err.error || `HTTP ${r.status}`);
@@ -38,7 +46,7 @@ export default function ArtifactPanel({ artifacts, sessionId, onClose }: Props) 
       const blob = await r.blob();
       const dispo = r.headers.get("Content-Disposition") || "";
       const match = /filename="?([^";]+)"?/i.exec(dispo);
-      const filename = match?.[1] || `artifacts-session-${sessionId}.zip`;
+      const filename = match?.[1] || `artifacts-reply-${sessionId}.zip`;
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
       a.download = filename;
@@ -85,7 +93,9 @@ export default function ArtifactPanel({ artifacts, sessionId, onClose }: Props) 
       <aside className={`${shellCls} h-[75vh] md:h-auto`}>
         <PanelHeader
           title="Artifacts"
-          subtitle={`${artifacts.length} item${artifacts.length === 1 ? "" : "s"}`}
+          subtitle={isSingleResponse
+            ? `${artifacts.length} file dari jawaban ini`
+            : `${artifacts.length} file terbaru`}
           onClose={onClose}
           accent={
             <span
@@ -96,14 +106,14 @@ export default function ArtifactPanel({ artifacts, sessionId, onClose }: Props) 
             </span>
           }
           actions={
-            sessionId != null && artifacts.length > 0 ? (
-              <Button variant="ghost" size="sm" onClick={downloadZip} disabled={zipBusy} title="Download semua artifact sesi ini sebagai .zip">
+            canDownloadZip ? (
+              <Button variant="ghost" size="sm" onClick={downloadZip} disabled={zipBusy} title="Unduh semua artifact sesi ini sebagai satu file ZIP">
                 <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                   <polyline points="7 10 12 15 17 10" />
                   <line x1="12" y1="15" x2="12" y2="3" />
                 </svg>
-                <span className="hidden sm:inline">{zipBusy ? "Membuat…" : "ZIP"}</span>
+                <span className="hidden sm:inline">{zipBusy ? "Membuat…" : "Unduh semua"}</span>
               </Button>
             ) : null
           }

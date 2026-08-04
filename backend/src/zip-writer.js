@@ -16,6 +16,8 @@
 
 import { Writable } from "node:stream";
 import { Buffer } from "node:buffer";
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
 
 // DOS time/date encoding for the local + central headers. ZIP uses
 // local-time fields; we don't need to be exact — 1980-01-01 00:00:00
@@ -47,6 +49,25 @@ function crc32(buf) {
   c = 0xffffffff;
   for (let i = 0; i < buf.length; i++) c = crc32.table[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
   return (c ^ 0xffffffff) >>> 0;
+}
+
+function crc32Update(current, buf) {
+  let c = current;
+  if (!crc32.table) crc32(Buffer.alloc(0));
+  for (let i = 0; i < buf.length; i++) c = crc32.table[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
+  return c >>> 0;
+}
+
+function safeEntryName(name) {
+  const safeName = String(name)
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .replace(/^[A-Za-z]:\//, "")
+    .replace(/\0/g, "");
+  const nameBuf = Buffer.from(safeName, "utf8");
+  if (nameBuf.length === 0) throw new Error("zip entry name required");
+  if (nameBuf.length > 0xffff) throw new Error(`zip entry name too long: ${safeName}`);
+  return { safeName, nameBuf };
 }
 
 // Encode a 32-bit unsigned integer little-endian into 4 bytes. Buffer
@@ -99,19 +120,10 @@ export class ZipWriter extends Writable {
    * a Buffer (use Buffer.from(str, "utf8") for text).
    */
   async addFile(name, data) {
+    if (this.entries.length >= 0xffff) throw new Error("zip archive exceeds ZIP32 entry limit");
     if (!(data instanceof Buffer)) data = Buffer.from(String(data ?? ""), "utf8");
-    // Sanitize: ZIP entries use forward slashes, no leading separator,
-    // no drive letters. Defensive against bad input from upstream code
-    // paths (titles, etc.) so an unwary entry name can't escape the
-    // archive root.
-    const safeName = String(name)
-      .replace(/\\/g, "/")
-      .replace(/^\/+/, "")
-      .replace(/^[A-Za-z]:\//, "")
-      .replace(/\0/g, "");
-    const nameBuf = Buffer.from(safeName, "utf8");
-    if (nameBuf.length === 0) throw new Error("zip entry name required");
-    if (nameBuf.length > 0xffff) throw new Error(`zip entry name too long: ${safeName}`);
+    if (data.length > 0xffffffff) throw new Error("zip entry exceeds ZIP32 size limit");
+    const { safeName, nameBuf } = safeEntryName(name);
     const { time, date } = dosDateTime();
     const crc = crc32(data);
 
@@ -141,6 +153,52 @@ export class ZipWriter extends Writable {
     await this._writeBuffer(nameBuf);
     await this._writeBuffer(data);
     this.offset += lfh.length + nameBuf.length + data.length;
+  }
+
+  async addFileFromPath(name, filePath) {
+    if (this.entries.length >= 0xffff) throw new Error("zip archive exceeds ZIP32 entry limit");
+    const fileStat = await stat(filePath);
+    if (!fileStat.isFile()) throw new Error(`zip source is not a file: ${filePath}`);
+    if (fileStat.size > 0xffffffff) throw new Error("zip entry exceeds ZIP32 size limit");
+
+    let crcState = 0xffffffff;
+    for await (const chunk of createReadStream(filePath)) {
+      crcState = crc32Update(crcState, chunk);
+    }
+    const crc = (crcState ^ 0xffffffff) >>> 0;
+    const { safeName, nameBuf } = safeEntryName(name);
+    const { time, date } = dosDateTime();
+
+    const lfh = Buffer.alloc(30);
+    lfh.writeUInt32LE(0x04034b50, 0);
+    lfh.writeUInt16LE(20, 4);
+    lfh.writeUInt16LE(0, 6);
+    lfh.writeUInt16LE(0, 8);
+    lfh.writeUInt16LE(time, 10);
+    lfh.writeUInt16LE(date, 12);
+    lfh.writeUInt32LE(crc, 14);
+    lfh.writeUInt32LE(fileStat.size, 18);
+    lfh.writeUInt32LE(fileStat.size, 22);
+    lfh.writeUInt16LE(nameBuf.length, 26);
+    lfh.writeUInt16LE(0, 28);
+
+    const headerOffset = this.offset;
+    this.entries.push({
+      name: safeName,
+      crc,
+      size: fileStat.size,
+      offset: headerOffset,
+      time,
+      date,
+      nameBytes: nameBuf,
+    });
+
+    await this._writeBuffer(lfh);
+    await this._writeBuffer(nameBuf);
+    for await (const chunk of createReadStream(filePath)) {
+      await this._writeBuffer(chunk);
+    }
+    this.offset += lfh.length + nameBuf.length + fileStat.size;
   }
 
   _writeBuffer(buf) {

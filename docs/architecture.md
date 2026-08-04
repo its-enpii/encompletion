@@ -40,7 +40,8 @@ Awalnya backend spawn subprocess `claude --output-format stream-json` dan pipe k
 - **`llm-runner.js`**: HTTP streaming chat-completions. Bangun pesan (system + history + hasil tool), loop sampai model berhenti minta tool, emit `text`/`tool_use`/`tool_result`/`result` lewat `EventEmitter`.
 - **`db/index.js`**: SQLite WAL, migrasi in-place idempotent. Skema: `users`, `user_settings`, `projects`, `sessions`, `messages`, `attachments`, `artifacts`, `models`, memory/RAG tables.
 - **`run-registry.js`**: peta runId → emitter, supaya SSE handler push event dari runner di request terpisah.
-- **`tools.js`** + **`skill_loader.js`**: tool ke model (`Read`, `Write`, `Edit`, `Glob`, `Grep`, `Web*`, `EmitArtifact`, `Skill_*`). Skill di `$HOME/.enllm/skills/`.
+- **`tools.js`** + **`skill_loader.js`**: tool ke model (`Read`, `Write`, `Edit`, `Glob`, `Grep`, `Web*`, `EmitArtifact`, `BuildDocument`, `Skill_*`). Skill di `$HOME/.enllm/skills/`.
+- **`document-build-runner.js`**: menjalankan generator JavaScript buatan AI untuk PDF/PPTX/DOCX/XLSX/HTML/SVG/gambar. Proses memakai Node permission sandbox, workspace per sesi, tanpa network/child process, timeout, batas memori, serta validasi output sebelum dipublikasikan sebagai artifact.
 - **`rag.js`**: chunk dokumen per project, embed `@xenova/transformers`, retrieve top-k saat prompt masuk.
 
 ### Frontend

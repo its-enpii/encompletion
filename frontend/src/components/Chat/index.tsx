@@ -86,6 +86,7 @@ export default function Chat({
 
   const [toolUses, setToolUses] = useState<ToolUse[]>([]);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [artifactPanelMessageId, setArtifactPanelMessageId] = useState<number | null>(null);
   const [attachmentsByMsg, setAttachmentsByMsg] = useState<Record<number, Att[]>>({});
   // Map of message_id -> compact artifact info for the inline cards.
   // Only carries a short preview string here so the messages array
@@ -102,6 +103,16 @@ export default function Chat({
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [pendingAtts, setPendingAtts] = useState<PendingAtt[]>([]);
+  const latestArtifacts = useMemo(() => Array.from(
+    artifacts.reduce((byTitle, artifact) => {
+      const key = (artifact.title || `artifact-${artifact.id}`).toLowerCase();
+      const current = byTitle.get(key);
+      if (!current || artifact.version > current.version || (artifact.version === current.version && artifact.id > current.id)) {
+        byTitle.set(key, artifact);
+      }
+      return byTitle;
+    }, new Map<string, Artifact>()).values(),
+  ).sort((left, right) => left.id - right.id), [artifacts]);
   const [showArtifactPanel, setShowArtifactPanelRaw] = useState(false);
   // Mirror the messages list through this setter so any code path
   // — setMessages from useEffect, onText socket handler, setMessages
@@ -341,7 +352,8 @@ export default function Chat({
         : null;
       setActiveProject(projectFromSession);
       setToolUses(t);
-      setArtifacts((a as Artifact[]).filter((x) => !x.dup_of));
+      setArtifacts((a as Artifact[]).filter((artifact) => !artifact.dup_of));
+      setArtifactPanelMessageId(null);
       // Merge local optimistic attachment chips with the DB-loaded ones.
       // Same race rationale as `m` above — fresh chat with attachments
       // can fire loadSession before the message_attachments rows are
@@ -1427,9 +1439,12 @@ export default function Chat({
         model={model}
         onChangeModel={setModel}
         modelOptions={modelOptions}
-        artifactCount={artifacts.length}
+        artifactCount={latestArtifacts.length}
         artifactPanelOpen={showArtifactPanel}
-        onToggleArtifacts={() => setShowArtifactPanel(!showArtifactPanel)}
+        onToggleArtifacts={() => {
+          setArtifactPanelMessageId(null);
+          setShowArtifactPanel(!showArtifactPanel);
+        }}
         needsLlmSetup={!chatReady}
         onOpenLlmSettings={openLlmSettings}
         llmSetupReason={!llm.configured
@@ -1453,6 +1468,10 @@ export default function Chat({
         onRegenerate={regenerate}
         onRetry={retryFailedMessage}
         onSuggestion={(text) => setInput(text)}
+        onOpenArtifactGroup={(messageId) => {
+          setArtifactPanelMessageId(messageId);
+          setShowArtifactPanel(true);
+        }}
       />
 
       <Composer
@@ -1515,9 +1534,14 @@ export default function Chat({
       {chatColumn}
       {showArtifactPanel && (
         <ArtifactPanel
-          artifacts={artifacts}
+          artifacts={artifactPanelMessageId == null
+            ? latestArtifacts
+            : artifacts.filter((artifact) => artifact.message_id === artifactPanelMessageId)}
           sessionId={sessionId}
-          onClose={() => setShowArtifactPanel(false)}
+          onClose={() => {
+            setShowArtifactPanel(false);
+            setArtifactPanelMessageId(null);
+          }}
         />
       )}
     </div>

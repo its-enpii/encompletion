@@ -44,6 +44,7 @@ import { renderSessionSummaryBlock } from "./summarized.js";
 import { readArtifactForSession } from "./artifact-context.js";
 import { buildTodayContextBlock } from "./today-context.js";
 import { buildXlsx, buildPdf, buildPptx, safeDocFileName } from "./document-writer.js";
+import { documentBuildLimits, runDocumentBuild } from "./document-build-runner.js";
 import db from "./db/index.js";
 import { resolveProviderFor, LLMNotConfigured } from "./llm-provider.js";
 import { promises as fsp } from "node:fs";
@@ -52,13 +53,26 @@ import crypto from "node:crypto";
 
 const LLM_STREAM_TIMEOUT_MS = Math.max(30_000, Number(process.env.LLM_STREAM_TIMEOUT_MS) || 120_000);
 
+const BUILT_DOCUMENT_META = {
+  '.docx': { language: 'docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', label: 'Word document' },
+  '.html': { language: 'html', mime: 'text/html; charset=utf-8', label: 'HTML document' },
+  '.jpeg': { language: 'jpeg', mime: 'image/jpeg', label: 'JPEG image' },
+  '.jpg': { language: 'jpg', mime: 'image/jpeg', label: 'JPEG image' },
+  '.pdf': { language: 'pdf', mime: 'application/pdf', label: 'PDF document' },
+  '.png': { language: 'png', mime: 'image/png', label: 'PNG image' },
+  '.pptx': { language: 'pptx', mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', label: 'PowerPoint deck' },
+  '.svg': { language: 'svg', mime: 'image/svg+xml', label: 'SVG image' },
+  '.xlsx': { language: 'xlsx', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', label: 'Excel workbook' },
+};
+
 // Chat-web product (Claude/ChatGPT/Gemini style) — not a coding agent.
 // File tools exist only as a workspace for drafting multi-file artifacts.
 // Shell/Bash is not offered to the model.
 const SYSTEM_PROMPT = `You are a helpful chat assistant in a web conversation UI
 (like Claude, ChatGPT, or Gemini). Answer clearly. Prefer natural prose.
-You are not a coding agent and you cannot run shell commands or operate a
-developer terminal.
+You are not a general coding agent and you cannot run shell commands or operate
+a developer terminal. The one exception is authoring JavaScript document
+generators in the session workspace for BuildDocument.
 
 When the user wants a sizable deliverable (HTML page, React component, SVG,
 markdown doc, config, script, table), publish it with EmitArtifact so it
@@ -66,6 +80,26 @@ opens in the artifact panel. Pass {type, title, language?, content}. Skip
 EmitArtifact for short inline examples that only illustrate a sentence.
 When you EmitArtifact, do not also paste the full content as a fenced code
 block — describe what you published and let the panel show the body.
+
+When a deliverable contains multiple files, publish every finished file as a
+separate artifact so each file can be downloaded individually and the user can
+download the complete set as one ZIP. Call EmitArtifact once per text file and
+CreateDocument once per PDF/XLSX/PPTX file. Keep relative paths in titles when
+they matter (for example src/app.js and styles/main.css). Workspace files are
+only drafts and are not downloadable until you publish each finished file.
+
+When revising an existing artifact, keep the exact same title/path and publish
+the complete revised file again. This creates a new version for chat history;
+do not invent names such as file-v2.js, file-fixed.js, or duplicate copies.
+
+For visually rich PDF, PPTX, DOCX, XLSX, HTML, SVG, PNG, or JPEG output, you
+may author a JavaScript generator in the workspace and run it with
+BuildDocument. This is the preferred path when the user asks for custom visual
+design instead of a basic report. The generator may import pptxgenjs, pdfkit,
+xlsx, and docx. It runs without network or child-process access and may
+only read/write the session workspace. Write all source/assets first, then call
+BuildDocument with the entrypoint and every final output path. BuildDocument
+publishes the outputs automatically, so do not EmitArtifact for the binaries.
 
 When the user wants a real downloadable spreadsheet, PDF, or PowerPoint,
 use CreateDocument (format xlsx|pdf|pptx). Do not fake Office binaries as
@@ -225,6 +259,7 @@ const TOOLS = [
       description:
         "Publish a deliverable to the chat artifact panel (preview, copy, " +
         "save, render). Use for complete files, UI snippets, configs, docs. " +
+        "For multi-file deliverables, call this once for every text file. " +
         "Not for tiny one-liner examples that only illustrate prose. " +
         "For real .xlsx/.pdf/.pptx downloads use CreateDocument instead.",
       parameters: {
@@ -269,11 +304,52 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "BuildDocument",
+      description:
+        "Run a JavaScript document generator from the session workspace in a " +
+        "restricted sandbox and publish its final files. Use for custom visual " +
+        "PDF/PPTX/DOCX/XLSX/HTML/SVG/PNG/JPEG documents. Available packages: " +
+        "pptxgenjs, pdfkit, xlsx, and docx. No network, child processes, or " +
+        `writes outside the workspace. Maximum ${documentBuildLimits.maxFiles} outputs, ` +
+        `${Math.round(documentBuildLimits.maxFileBytes / 1024 / 1024)}MB each.`,
+      parameters: {
+        type: "object",
+        properties: {
+          entrypoint: {
+            type: "string",
+            description: "Workspace-relative .js/.mjs/.cjs generator entrypoint.",
+          },
+          outputs: {
+            type: "array",
+            description: "Final workspace files to validate and publish after a successful build.",
+            items: {
+              oneOf: [
+                { type: "string" },
+                {
+                  type: "object",
+                  properties: {
+                    path: { type: "string" },
+                    title: { type: "string", description: "Optional artifact title/path override." },
+                  },
+                  required: ["path"],
+                },
+              ],
+            },
+          },
+        },
+        required: ["entrypoint", "outputs"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "CreateDocument",
       description:
-        "Create a downloadable binary document (xlsx, text PDF, or pptx) " +
+        "Create a basic downloadable binary document (xlsx, text PDF, or pptx) " +
         "and attach it to the chat as a file artifact. Prefer this over " +
-        "markdown tables/lists when the user asks for Excel, PDF, or PowerPoint. " +
+        "markdown tables/lists for simple documents. Use BuildDocument instead " +
+        "when the user requests custom visual design or Word/DOCX. " +
         'format MUST be exactly one of: "pdf", "xlsx", "pptx" (lowercase).',
       parameters: {
         type: "object",
@@ -829,6 +905,8 @@ export function runLLM(prompt, opts = {}, onEvent) {
             if (r?.error) {
               process.stderr.write(`[CreateDocument] failed: ${r.error}\n`);
             }
+          } else if (tc.name === "BuildDocument") {
+            r = await runBuildDocument(args, onEvent, { cwd, sessionId: opts.sessionId });
           } else if (tc.name === "Bash") {
             // Chat product, not coding agent — Bash never on tool list.
             r = { error: "bash is disabled (chat product, not a coding agent)" };
@@ -1074,6 +1152,54 @@ async function runCreateDocument(rawArgs, emit, { cwd, sessionId } = {}) {
   } });
   return {
     text: `created ${format.toUpperCase()} "${fileName}" (${buf.length} bytes). User can download from the artifact card.`,
+  };
+}
+
+async function runBuildDocument(args, emit, { cwd, sessionId } = {}) {
+  const result = await runDocumentBuild({
+    cwd,
+    entrypoint: args?.entrypoint,
+    outputs: args?.outputs,
+  });
+  if (result.error) {
+    const logs = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
+    return { error: logs ? `${result.error}\n${logs}` : result.error };
+  }
+
+  const storageRoot = process.env.STORAGE_PATH
+    ? path.resolve(process.cwd(), process.env.STORAGE_PATH)
+    : path.resolve(process.cwd(), "storage/attachments");
+  const docsDir = path.join(storageRoot, "docs", String(sessionId || "anon"));
+  await fsp.mkdir(docsDir, { recursive: true });
+
+  const published = [];
+  for (const output of result.outputs) {
+    const meta = BUILT_DOCUMENT_META[output.extension];
+    if (!meta) return { error: `unsupported built document type: ${output.extension}` };
+    const relativeTitle = output.title || output.path;
+    const fileName = safeDocFileName(path.basename(relativeTitle), output.extension);
+    const unique = `${Date.now()}-${crypto.randomBytes(4).toString("hex")}-${fileName}`;
+    const destination = path.join(docsDir, unique);
+    await fsp.copyFile(output.realPath, destination);
+    const rel = path.relative(storageRoot, destination).split(path.sep).join("/");
+    const contentHash = hashArtifact("file", rel + "|" + output.size);
+    emit({ type: "tool_artifact", artifact: {
+      type: "file",
+      language: meta.language,
+      title: relativeTitle,
+      content: `${meta.label} (${output.size} bytes)`,
+      content_hash: contentHash,
+      file_path: rel,
+      mime_type: meta.mime,
+      file_size: output.size,
+      source: "tool",
+    } });
+    published.push(relativeTitle);
+  }
+
+  const logs = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
+  return {
+    text: `built and published ${published.length} document(s): ${published.join(", ")}${logs ? `\nBuild log:\n${logs}` : ""}`,
   };
 }
 

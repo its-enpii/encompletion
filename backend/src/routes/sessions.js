@@ -13,6 +13,29 @@ const WORKDIR_ROOT = process.env.WORKDIR_ROOT
   : path.resolve(process.cwd(), 'storage/workdirs');
 fs.mkdirSync(WORKDIR_ROOT, { recursive: true });
 
+const ARTIFACT_STORAGE_ROOT = process.env.STORAGE_PATH
+  ? path.resolve(process.cwd(), process.env.STORAGE_PATH)
+  : path.resolve(process.cwd(), 'storage/attachments');
+fs.mkdirSync(ARTIFACT_STORAGE_ROOT, { recursive: true });
+const ARTIFACT_STORAGE_REAL = fs.realpathSync(ARTIFACT_STORAGE_ROOT);
+const ARTIFACT_STORAGE_PREFIX = ARTIFACT_STORAGE_REAL + path.sep;
+
+function resolveStoredArtifactPath(filePath) {
+  if (!filePath) return null;
+  const candidate = path.resolve(ARTIFACT_STORAGE_REAL, filePath);
+  const relative = path.relative(ARTIFACT_STORAGE_REAL, candidate);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) return null;
+  let real;
+  try { real = fs.realpathSync(candidate); }
+  catch { return null; }
+  if (real !== ARTIFACT_STORAGE_REAL && !real.startsWith(ARTIFACT_STORAGE_PREFIX)) return null;
+  try {
+    return fs.statSync(real).isFile() ? real : null;
+  } catch {
+    return null;
+  }
+}
+
 // Validate a workdir request from the client. We require:
 //   1. absolute path (relative paths get rejected so the model can never be
 //      pointed at /etc/passwd by accident)
@@ -52,6 +75,11 @@ function resolveWorkdir(user, requested) {
     return null;
   }
   return abs;
+}
+
+function defaultSessionWorkdir(user, sessionId) {
+  const ownerDir = (user.role || 'member') === 'admin' ? 'admin' : String(user.id);
+  return path.join(WORKDIR_ROOT, ownerDir, `session-${sessionId}`);
 }
 
 // Scope rows to the caller unless admin.
@@ -167,7 +195,7 @@ router.post('/', (req, res) => {
   }
   // Sandbox: only allow workdirs under WORKDIR_ROOT, owned by this user
   // (admins may use the global root). Empty/missing → default per-user.
-  const safeWorkdir = resolveWorkdir(req.user, workdir);
+  const safeWorkdir = workdir ? resolveWorkdir(req.user, workdir) : null;
   if (workdir && !safeWorkdir) {
     return res.status(400).json({ error: 'invalid workdir' });
   }
@@ -203,10 +231,15 @@ router.post('/', (req, res) => {
       new Date().toISOString(),
       new Date().toISOString()
     );
-  const row = db.prepare('SELECT * FROM sessions WHERE id = ?').get(info.lastInsertRowid);
+  const sessionId = Number(info.lastInsertRowid);
+  const resolvedWorkdir = safeWorkdir || defaultSessionWorkdir(req.user, sessionId);
+  if (!safeWorkdir) {
+    db.prepare('UPDATE sessions SET workdir = ? WHERE id = ?').run(resolvedWorkdir, sessionId);
+  }
+  const row = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId);
   // Eagerly create the directory so the first tool call doesn't race a mkdir.
-  if (safeWorkdir) {
-    try { fs.mkdirSync(safeWorkdir, { recursive: true }); } catch { /* ignore */ }
+  if (resolvedWorkdir) {
+    try { fs.mkdirSync(resolvedWorkdir, { recursive: true }); } catch { /* ignore */ }
   }
   res.json(row);
 });
@@ -259,7 +292,9 @@ router.patch('/:id', (req, res) => {
   }
   if (starred !== undefined) { fields.push('starred = ?'); params.push(starred ? 1 : 0); }
   if (workdir !== undefined) {
-    const safeWorkdir = resolveWorkdir(req.user, workdir);
+    const safeWorkdir = workdir
+      ? resolveWorkdir(req.user, workdir)
+      : defaultSessionWorkdir(req.user, own.id);
     if (workdir && !safeWorkdir) return res.status(400).json({ error: 'invalid workdir' });
     fields.push('workdir = ?'); params.push(safeWorkdir);
     if (safeWorkdir) { try { fs.mkdirSync(safeWorkdir, { recursive: true }); } catch { /* ignore */ } }
@@ -353,8 +388,7 @@ router.get('/:id/artifacts', (req, res) => {
 // by the chat — no roundtrip through the chat UI required.
 //
 // Usage:
-//   GET /api/sessions/:id/artifacts.zip             — everything
-//   GET /api/sessions/:id/artifacts.zip?ids=1,2,3   — only those
+//   GET /api/sessions/:id/artifacts.zip?ids=1,2,3   — one assistant response
 //
 // The handler streams straight from SQLite → STORED zip entries →
 // Express response. Memory footprint stays flat regardless of total
@@ -370,33 +404,38 @@ router.get('/:id/artifacts.zip', async (req, res) => {
       const n = Number(piece);
       if (Number.isInteger(n) && n > 0) out.push(n);
     }
-    return out.length ? out : null;
+    return out.length ? [...new Set(out)] : null;
   })();
 
-  let rows;
-  if (requestedIds) {
-    const placeholders = requestedIds.map(() => '?').join(',');
-    rows = db
-      .prepare(
-        `SELECT id, title, type, language, content
-           FROM artifacts
-           WHERE session_id = ? AND id IN (${placeholders})
-           ORDER BY id ASC`
-      )
-      .all(req.params.id, ...requestedIds);
-  } else {
-    rows = db
-      .prepare(
-        `SELECT id, title, type, language, content
-           FROM artifacts
-           WHERE session_id = ?
-           ORDER BY id ASC`
-      )
-      .all(req.params.id);
+  if (!requestedIds) {
+    return res.status(400).json({ error: 'artifact ids are required' });
   }
 
-  if (rows.length === 0) {
+  const placeholders = requestedIds.map(() => '?').join(',');
+  const rows = db
+    .prepare(
+      `SELECT id, message_id, title, type, language, file_path
+         FROM artifacts
+        WHERE session_id = ? AND id IN (${placeholders})
+        ORDER BY id ASC`
+    )
+    .all(req.params.id, ...requestedIds);
+
+  if (rows.length !== requestedIds.length) {
     return res.status(404).json({ error: 'no artifacts in this session' });
+  }
+  if (new Set(rows.map((row) => row.message_id)).size !== 1) {
+    return res.status(400).json({ error: 'artifacts must belong to one assistant response' });
+  }
+
+  for (const row of rows) {
+    if (row.type !== 'file') continue;
+    row.resolved_file_path = resolveStoredArtifactPath(row.file_path);
+    if (!row.resolved_file_path) {
+      return res.status(404).json({
+        error: `artifact file missing: ${row.title || row.id}`,
+      });
+    }
   }
 
   // Deterministic filename + content-disposition. The slug uses the
@@ -414,7 +453,7 @@ router.get('/:id/artifacts.zip', async (req, res) => {
   res.setHeader('Content-Type', 'application/zip');
   res.setHeader(
     'Content-Disposition',
-    `attachment; filename="artifacts-${req.params.id}-${titleSlug}.zip"`
+    `attachment; filename="artifacts-${req.params.id}-reply-${rows[0].message_id}-${titleSlug}.zip"`
   );
 
   const zip = new ZipWriter(res);
@@ -425,13 +464,23 @@ router.get('/:id/artifacts.zip', async (req, res) => {
   // empty.
   const usedNames = new Map();
   function uniqueName(base) {
-    const cleanBase = (base || '')
-      .replace(/[^A-Za-z0-9._-]+/g, '_')
-      .replace(/^_+|_+$/g, '')
-      .slice(0, 80) || 'artifact';
+    const cleanBase = String(base || '')
+      .replace(/\\/g, '/')
+      .split('/')
+      .filter((segment) => segment && segment !== '.' && segment !== '..')
+      .map((segment) => segment
+        .replace(/[^A-Za-z0-9._-]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 80))
+      .filter(Boolean)
+      .join('/') || 'artifact';
     const n = (usedNames.get(cleanBase) || 0) + 1;
     usedNames.set(cleanBase, n);
-    return n === 1 ? cleanBase : `${cleanBase.replace(/(\.[^.]+)?$/, '')}-${n}$1`;
+    if (n === 1) return cleanBase;
+    const slash = cleanBase.lastIndexOf('/');
+    const dir = slash >= 0 ? cleanBase.slice(0, slash + 1) : '';
+    const file = slash >= 0 ? cleanBase.slice(slash + 1) : cleanBase;
+    return `${dir}${file.replace(/(\.[^.]+)?$/, `-${n}$1`)}`;
   }
 
   zip.on('error', (err) => {
@@ -452,8 +501,15 @@ router.get('/:id/artifacts.zip', async (req, res) => {
       const filename = uniqueName(base);
       // Add a directory prefix inside the archive so multiple-session
       // unzips don't smear into each other when concatenated.
-      const archivePath = `${req.params.id}/${filename}`;
-      await zip.addFile(archivePath, Buffer.from(row.content || '', 'utf8'));
+      const archivePath = filename;
+      if (row.type === 'file') {
+        await zip.addFileFromPath(archivePath, row.resolved_file_path);
+      } else {
+        const body = db
+          .prepare('SELECT content FROM artifacts WHERE session_id = ? AND id = ?')
+          .get(req.params.id, row.id);
+        await zip.addFile(archivePath, Buffer.from(body?.content || '', 'utf8'));
+      }
     }
     zip.end();
   } catch (err) {

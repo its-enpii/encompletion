@@ -34,6 +34,7 @@ export function MessageList({
   onRegenerate,
   onRetry,
   onSuggestion,
+  onOpenArtifactGroup,
 }: {
   messages: Msg[];
   toolUses: ToolUse[];
@@ -48,6 +49,7 @@ export function MessageList({
   onRegenerate?: (assistantMsgId: number) => void;
   onRetry?: (messageId: number) => void;
   onSuggestion?: (text: string) => void;
+  onOpenArtifactGroup?: (messageId: number) => void;
 }) {
   const [openArtifact, setOpenArtifact] = useState<{ id: number; title?: string | null } | null>(null);
   // Inline image preview modal — opens when the user clicks an image
@@ -127,6 +129,15 @@ export function MessageList({
                   ))}
               {m.role === "assistant" && artifactsByMsg[m.id]?.length ? (
                 <div className="flex flex-col gap-2 pl-12">
+                  {artifactsByMsg[m.id].length > 1 && onOpenArtifactGroup ? (
+                    <button
+                      type="button"
+                      onClick={() => onOpenArtifactGroup(m.id)}
+                      className="self-end rounded-[var(--r-sm)] px-2 py-1 text-[11px] font-medium text-[var(--magenta-700)] transition-colors hover:bg-[var(--magenta-50)]"
+                    >
+                      Buka {artifactsByMsg[m.id].length} file / unduh ZIP
+                    </button>
+                  ) : null}
                   {artifactsByMsg[m.id].map((a) => (
                     <ArtifactCard
                       key={a.id}
