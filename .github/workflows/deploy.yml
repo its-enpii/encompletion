@@ -61,11 +61,17 @@ jobs:
             git fetch --prune origin
             git reset --hard origin/main
             docker compose pull || true
-            # Pass the commit SHA into the frontend image so /build.txt
+            # Pass the commit SHA into both images so /build.txt (frontend)
             # carries a per-deploy stamp that VersionWatcher can detect.
+            # Backend also needs to be rebuilt on every push: the previous
+            # script only built frontend, which meant backend routes
+            # (e.g. /api/llm-settings) lagged behind main until the next
+            # manual rebuild. Any change under backend/ now triggers a
+            # rebuild because the context hash differs.
             GIT_SHA="${GIT_SHA:-local}" docker compose build frontend
-            docker compose up -d --force-recreate frontend
-            docker compose up -d backend nginx
+            GIT_SHA="${GIT_SHA:-local}" docker compose build backend
+            docker compose up -d --force-recreate backend frontend
+            docker compose up -d nginx
             docker image prune -f
             docker compose ps
 
