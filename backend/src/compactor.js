@@ -9,6 +9,14 @@
  * context (it has the recent turns verbatim).
  *
  * Mirrors extractor.js shape so a future shared abstraction is easy.
+ *
+ * Per-user provider
+ * ─────────────────
+ * The caller (compactor-worker.js) resolves the per-user provider via
+ * `resolveProviderFor` and passes it in. `compactTranscript` accepts
+ * either an object `{ baseUrl, apiKey, model }` (new path) or
+ * `undefined` for backwards-compat tests. The HTTP layer never reads
+ * env vars; an absent provider raises a clear `LLMNotConfigured`.
  */
 
 const SYSTEM = `You compress chat transcripts into concise summaries.
@@ -25,24 +33,18 @@ Rules:
 
 const MAX_SUMMARY_CHARS = 6000;
 
-async function callCompactorLLM({ system, user }) {
-  const baseUrl = (process.env.LLM_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
-  const apiKey = process.env.LLM_API_KEY || "";
-  // Operator can pick a cheaper model for compaction. Falls back to the
-  // same model the extractor uses (already optimized for short calls),
-  // then to the chat default, then to a Haiku-class id.
-  const model = process.env.LLM_COMPACT_MODEL
-    || process.env.LLM_EXTRACT_MODEL
-    || process.env.LLM_DEFAULT_MODEL
-    || "claude-haiku-4-5";
-  const r = await fetch(`${baseUrl}/chat/completions`, {
+async function callCompactorLLM({ system, user, provider }) {
+  if (!provider || !provider.baseUrl || !provider.apiKey || !provider.model) {
+    throw new Error('compactor: no provider (LLM_NOT_CONFIGURED)');
+  }
+  const r = await fetch(`${provider.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: apiKey ? `Bearer ${apiKey}` : "",
+      Authorization: `Bearer ${provider.apiKey}`,
     },
     body: JSON.stringify({
-      model,
+      model: provider.model,
       stream: false,
       temperature: 0,
       messages: [
@@ -62,14 +64,14 @@ let _llmImpl = callCompactorLLM;
 export function _setCompactorLLMForTests(fn) { _llmImpl = fn; }
 export function _resetCompactorLLMForTests() { _llmImpl = callCompactorLLM; }
 
-export async function compactTranscript(messages) {
+export async function compactTranscript(messages, provider) {
   if (!Array.isArray(messages) || messages.length === 0) return "";
   const transcript = messages
     .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${String(m.content || "").slice(0, 1500)}`)
     .join("\n");
   let raw;
   try {
-    raw = await _llmImpl({ system: SYSTEM, user: transcript });
+    raw = await _llmImpl({ system: SYSTEM, user: transcript, provider });
   } catch {
     return "";
   }

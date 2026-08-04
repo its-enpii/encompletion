@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useState } from "react";
-import type { Msg } from "./types";
+import type { Msg, RecallHit } from "./types";
 import { authFetch } from "@/lib/auth";
 
 const MarkdownView = dynamic(() => import("@/components/MarkdownView"), { ssr: false });
@@ -209,7 +209,78 @@ export function MessageBubble({
                 </div>
               )}
             </div>
+
+            {/* Recall badge — only when the cross-session RAG recall
+                block actually contributed hits above the score floor.
+                Hidden for short queries, off-topic turns, or first-ever
+                chats with no indexed history. Expands into a popover on
+                click so the user can see source labels + scores. */}
+            {msg.recall_hits && msg.recall_hits.length > 0 && (
+              <RecallBadge hits={msg.recall_hits} />
+            )}
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Compact "N sumber dipakai" badge under an assistant bubble. The
+ * count comes from cross-session RAG recall (top-K hits above the
+ * score floor). Click expands a popover listing each source with its
+ * label and cosine score so the user can audit what influenced the
+ * answer — no more mystery recall.
+ */
+function RecallBadge({ hits }: { hits: RecallHit[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative mt-1.5">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-1.5 rounded-full bg-[var(--paper-2)] px-2.5 py-1 text-[11px] text-[var(--ink-2)] ring-1 ring-inset ring-[var(--line)] transition-colors hover:bg-[var(--paper-3)] hover:text-[var(--ink)]"
+        title="Sumber yang dipakai model untuk menjawab"
+        aria-expanded={open}
+      >
+        <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M3 12h18" />
+          <path d="M12 3a14 14 0 0 1 0 18" />
+          <path d="M12 3a14 14 0 0 0 0 18" />
+        </svg>
+        <span>
+          {hits.length} {hits.length === 1 ? "sumber" : "sumber"} dipakai
+        </span>
+      </button>
+      {open && (
+        <div
+          className="anim-fade-in absolute left-0 top-full z-10 mt-1.5 w-72 max-w-[80vw] rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--paper)] p-2 shadow-[var(--shadow-3)]"
+          role="dialog"
+        >
+          <div className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--ink-3)]">
+            Recall — konteks dari chat sebelumnya
+          </div>
+          <ul className="space-y-1">
+            {hits.map((h, i) => (
+              <li
+                key={`${h.source_kind}-${h.source_id}-${i}`}
+                className="flex items-start gap-2 rounded-[var(--r-sm)] bg-[var(--paper-2)] px-2 py-1.5 text-[11px]"
+              >
+                <span className="mt-0.5 inline-flex h-4 shrink-0 items-center rounded-full bg-[var(--saffron-200)]/20 px-1.5 font-mono text-[9px] font-semibold text-[var(--saffron-700)]">
+                  #{i + 1}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-mono text-[var(--ink-2)]" title={h.label}>
+                    {h.label}
+                  </div>
+                  <div className="text-[var(--ink-3)]">
+                    score {h.score.toFixed(2)}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </div>

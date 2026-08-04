@@ -19,6 +19,19 @@
  * The EventEmitter fires 'close' when the streaming loop ends
  * (success or failure), so server.js can persist the assistant
  * message without further changes.
+ *
+ * Provider resolution
+ * ───────────────────
+ * The caller (typically `routes/runs.js`) passes an already-resolved
+ * `opts.provider = { baseUrl, apiKey, model }`. Resolving the
+ * provider here would mean duplicating DB work in the runner; the
+ * route handler is the right place since it also needs the same
+ * provider for its validation/error branches.
+ *
+ * If `opts.provider` is missing AND `opts.userId` is set, the runner
+ * will resolve via `resolveProviderFor` itself. When neither is
+ * available the runner throws `LLMNotConfigured` (surfaced as a
+ * stderr event for the chat UI).
  */
 
 import { EventEmitter } from "node:events";
@@ -26,12 +39,13 @@ import { runTool } from "./tools.js";
 import { skillTools, runSkillTool } from "./skill_loader.js";
 import { hashArtifact } from "./artifact-detector.js";
 import { renderMemoryFactsBlock } from "./memory.js";
-import { renderRecalledContextBlock } from "./recalled.js";
+import { resolveRecall } from "./recalled.js";
 import { renderSessionSummaryBlock } from "./summarized.js";
 import { readArtifactForSession } from "./artifact-context.js";
 import { buildTodayContextBlock } from "./today-context.js";
 import { buildXlsx, buildPdf, buildPptx, safeDocFileName } from "./document-writer.js";
 import db from "./db/index.js";
+import { resolveProviderFor, LLMNotConfigured } from "./llm-provider.js";
 import { promises as fsp } from "node:fs";
 import * as path from "node:path";
 import crypto from "node:crypto";
@@ -342,10 +356,16 @@ function resolveSystemPrompt(userId) {
 /**
  * Run an LLM turn. Returns immediately with a controller; the actual
  * loop runs in the background and emits events via `onEvent`.
+ *
+ * Provider resolution order:
+ *   1. `opts.provider = { baseUrl, apiKey, model }` (preferred)
+ *   2. `opts.userId` → `resolveProviderFor(userId, { model })`
+ *   3. Otherwise: emit a stderr error and close the controller with
+ *      `is_error: true` — chat path sees an error banner.
  */
 export function runLLM(prompt, opts = {}, onEvent) {
   const startedAt = Date.now();
-  const modelName = opts.model || process.env.LLM_DEFAULT_MODEL || "workspace";
+  const requestedModel = opts.model;
   const cwd = opts.cwd || process.cwd();
   // Per-project opt-outs: a disabled skill name is invisible to both
   // Skill_list and Skill_read. Snapshot once at turn start so a model
@@ -374,6 +394,10 @@ export function runLLM(prompt, opts = {}, onEvent) {
   // the user-prompt prefix and injected here as a <system> block. Resolved
   // by the route handler; empty string when no project or no instructions.
   const projectInstructionsBlock = opts.projectInstructionsBlock || "";
+  // Project knowledge — moved from the user-prompt prefix into the system
+  // prompt so the gateway treats it as authoritative context. The route
+  // handler resolves it via buildProjectKnowledgeBlock(); empty string
+  // when the session has no project or no knowledge rows.
   const projectKnowledgeBlock = opts.projectKnowledgeBlock || "";
   const artifactContext = opts.artifactContext || "";
   // Cross-session recall (Phase 3): top-3 snippets from past chats
@@ -385,16 +409,29 @@ export function runLLM(prompt, opts = {}, onEvent) {
   // the IIFE still emits `init` and starts the round, so the user
   // sees no perceptible delay.
   const blocks = { recalled: "" };
-  // Order: memory scope → project instructions → recalled
-  // → session summary. Recall block starts empty; IIFE fills it before
-  // the first chat-completions request.
+  // Order rationale (top → bottom of system prompt):
+  //   1. project instructions — first so the model sees author intent
+  //      before any of our default rules. Primacy bias: rules at the
+  //      start of a system prompt tend to dominate the model's behavior
+  //      more than rules later.
+  //   2. project knowledge — next, paired with instructions since they
+  //      both come from the project owner. The model can ground its
+  //      answers in this block without having to re-read it.
+  //   3. today / user facts / project facts — situational context.
+  //   4. base systemPrompt const — default behavior rules (artifact
+  //      tooling, web search policy, etc.). Now sits BELOW the user's
+  //      intent, so project-specific instructions take priority.
+  //   5. artifact manifest, recalled snippets, session summary — tail
+  //      material the model can reference without dominating the prompt.
+  // Recall block starts empty; IIFE fills it before the first
+  // chat-completions request.
   const summaryBlock = opts.sessionId
     ? renderSessionSummaryBlock(opts.sessionId)
     : "";
   // Fresh clock each turn so "sekarang" / relative dates stay accurate.
   const nowBlock = buildTodayContextBlock();
   const fullSystemPrompt = (b) =>
-    [nowBlock, memoryBlock, projectMemoryBlock, projectInstructionsBlock, projectKnowledgeBlock, artifactContext, b, summaryBlock]
+    [projectInstructionsBlock, projectKnowledgeBlock, nowBlock, memoryBlock, projectMemoryBlock, artifactContext, b, summaryBlock]
       .filter(Boolean)
       .reduce((acc, block) => acc + "\n\n" + block, systemPrompt);
   const messagesRef = {
@@ -409,19 +446,6 @@ export function runLLM(prompt, opts = {}, onEvent) {
   };
   const sessionId = opts.sessionId || cryptoRandomId();
 
-  // Emit init synchronously so the controller can be returned to
-  // server.js without it having to await anything. server.js already
-  // wraps onEvent callbacks, so a synchronous emit before returning is
-  // safe.
-  onEvent({
-    type: "system",
-    subtype: "init",
-    session_id: sessionId,
-    cwd,
-    model: modelName,
-    tools: TOOLS.map((t) => t.function.name),
-  });
-
   const proc = new EventEmitter();
   let aborted = false;
   let activeController = null;
@@ -431,6 +455,65 @@ export function runLLM(prompt, opts = {}, onEvent) {
 
   // Kick off the background loop.
   (async () => {
+    const totals = { input_tokens: 0, output_tokens: 0 };
+
+    // Resolve provider before any HTTP call. Two paths:
+    //   1. Caller-supplied opts.provider (preferred; matches the
+    //      route's validation surface and avoids a second DB read).
+    //   2. Resolve from opts.userId via the provider resolver.
+    // The model name is determined by the resolver (it picks the
+    // caller's opts.model if it's in the user's imported list,
+    // otherwise the first imported model).
+    let provider = opts.provider;
+    let modelName = '';
+    if (provider && provider.baseUrl && provider.apiKey && provider.model) {
+      modelName = provider.model;
+    } else if (Number.isInteger(opts.userId) && opts.userId > 0) {
+      try {
+        provider = await resolveProviderFor(opts.userId, { model: requestedModel });
+        modelName = provider.model;
+      } catch (e) {
+        // LLMNotConfigured or any other resolution failure — emit a
+        // clear stderr error and close the controller with is_error.
+        onEvent({ type: "stderr", text: `[llm] ${e?.message || e}\n` });
+        onEvent({
+          type: "result",
+          is_error: true,
+          result: e?.message || String(e),
+          duration_ms: Date.now() - startedAt,
+          total_cost_usd: 0,
+          usage: totals,
+        });
+        setImmediate(() => proc.emit("close", -1));
+        return;
+      }
+    } else {
+      // No provider + no userId — chat path with no LLM. Fail loudly.
+      const msg = 'LLM_NOT_CONFIGURED: no provider and no user context';
+      onEvent({ type: "stderr", text: `[llm] ${msg}\n` });
+      onEvent({
+        type: "result",
+        is_error: true,
+        result: msg,
+        duration_ms: Date.now() - startedAt,
+        total_cost_usd: 0,
+        usage: totals,
+      });
+      setImmediate(() => proc.emit("close", -1));
+      return;
+    }
+
+    // Emit init now that we know the model. Defered so the FE knows
+    // exactly which model responded when there's a resolution path.
+    onEvent({
+      type: "system",
+      subtype: "init",
+      session_id: sessionId,
+      cwd,
+      model: modelName,
+      tools: TOOLS.map((t) => t.function.name),
+    });
+
     // Cross-session recall: resolve the recall block before constructing
     // messages so the first turn includes the snippets. rag.query is
     // usually <50ms with the LRU embedder cache; first-call cold embed
@@ -438,12 +521,23 @@ export function runLLM(prompt, opts = {}, onEvent) {
     // so the user sees no delay.
     if (opts.userId) {
       try {
-        blocks.recalled = await renderRecalledContextBlock(
+        const recall = await resolveRecall(
           opts.userId,
           prompt,
-          opts.sessionId || null
+          opts.sessionId || null,
+          // projectId flows from the route handler (opts.projectId) so
+          // recall's project_knowledge filter matches the chat's actual
+          // project. Null when the session has no project.
+          opts.projectId ?? null
         );
+        blocks.recalled = recall.block;
         messagesRef.systemContent = fullSystemPrompt(blocks.recalled);
+        // Emit a top-level event so the FE can show a "sources used"
+        // indicator on the assistant message. Empty array → suppress so
+        // we don't spam "0 sources" for every short or off-topic turn.
+        if (recall.hits.length > 0) {
+          onEvent({ type: "recall", hits: recall.hits });
+        }
       } catch {
         blocks.recalled = "";
         messagesRef.systemContent = fullSystemPrompt("");
@@ -466,8 +560,6 @@ export function runLLM(prompt, opts = {}, onEvent) {
     // exploring an empty working directory instead of just looking at
     // the image it was handed).
     let toolsEnabled = opts.toolsEnabled !== false;
-
-    const totals = { input_tokens: 0, output_tokens: 0 };
 
     try {
       // Cap tool rounds so a confused model (retry CreateDocument forever)
@@ -494,6 +586,8 @@ export function runLLM(prompt, opts = {}, onEvent) {
             messages,
             includeTools: toolsEnabled,
             signal: activeController.signal,
+            baseUrl: provider.baseUrl,
+            apiKey: provider.apiKey,
           });
           if (sse.status !== 429) break;
           clearTimeout(activeTimer);
@@ -983,10 +1077,8 @@ async function runCreateDocument(rawArgs, emit, { cwd, sessionId } = {}) {
   };
 }
 
-async function fetchChatCompletion({ model, messages, includeTools = true, signal }) {
-  const baseUrl = (process.env.LLM_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
-  const apiKey = process.env.LLM_API_KEY || "";
-  const url = `${baseUrl}/chat/completions`;
+async function fetchChatCompletion({ model, messages, includeTools = true, signal, baseUrl, apiKey }) {
+  const url = `${baseUrl.replace(/\/+$/, "")}/chat/completions`;
   const body = {
     model,
     messages,

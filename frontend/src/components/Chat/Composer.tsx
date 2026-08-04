@@ -25,6 +25,14 @@ type Props = {
   // /api/attachments pipeline. Composer still calls onAttach (which
   // opens the file picker) for the toolbar Attach button.
   onFiles: (files: FileList) => void;
+  // Per-user LLM gate — when the user has not configured their
+  // provider (or has no imported models), the Send button is disabled
+  // and a one-line inline hint explains why. The disabled click
+  // bounces the user to the AI Settings dialog so onboarding friction
+  // stays low.
+  disabled?: boolean;
+  disabledReason?: string;
+  onDisabledClick?: () => void;
 };
 
 export function Composer({
@@ -41,6 +49,9 @@ export function Composer({
   currentProjectId,
   onManageSkills,
   onFiles,
+  disabled = false,
+  disabledReason,
+  onDisabledClick,
 }: Props) {
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   // Local drag state — only the composer wrapper reacts to dragover/
@@ -58,7 +69,10 @@ export function Composer({
     ta.style.overflowY = ta.scrollHeight > max ? "auto" : "hidden";
   }, [value]);
 
-  const canSend = !streaming && (value.trim().length > 0 || pendingAtts.length > 0);
+  const canSend =
+    !disabled &&
+    !streaming &&
+    (value.trim().length > 0 || pendingAtts.length > 0);
   const charCount = value.length;
 
   function onDragEnter(e: React.DragEvent) {
@@ -212,6 +226,19 @@ export function Composer({
         <p className="mt-2 text-center text-[11px] text-[var(--ink-3)]">
           Lampiran · plan/PRD · Excel/PDF/PPT · artifact di panel
         </p>
+
+        {disabled && disabledReason && (
+          <button
+            type="button"
+            onClick={() => onDisabledClick?.()}
+            className="mt-2 inline-flex items-center gap-2 rounded-full border border-[var(--warning)]/40 bg-[var(--warning-50)] px-3 py-1 text-[11px] font-medium text-[var(--warning)] transition-colors hover:bg-[var(--warning)]/15"
+            title="Buka AI Settings"
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-[var(--warning)]" />
+            {disabledReason}
+            <span aria-hidden="true">→</span>
+          </button>
+        )}
       </div>
     </div>
   );

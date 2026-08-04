@@ -14,6 +14,7 @@ import modelsRouter from './routes/models.js';
 import artifactsRouter from './routes/artifacts.js';
 import runsRouter from './routes/runs.js';
 import memoryRouter from './routes/memory.js';
+import llmSettingsRouter from './routes/llm-settings.js';
 import { startExtractorWorker } from './extractor-worker.js';
 import { startIndexerWorker } from './indexer-worker.js';
 import { startCompactorWorker } from './compactor-worker.js';
@@ -88,6 +89,12 @@ app.use('/api/artifacts', requireAuth, artifactsRouter);
 // Memory facts — per-user persistent context injected into every system
 // prompt. requireAuth-scoped: a user only ever sees their own facts.
 app.use('/api/memory', requireAuth, memoryRouter);
+
+// Per-user LLM configuration — base_url, encrypted api_key, and
+// per-user model import. Mounted at /api/llm-settings with its own
+// requireAuth (mirroring /api/memory) so the GET/PUT/test paths all
+// see req.user.
+app.use('/api/llm-settings', requireAuth, llmSettingsRouter);
 
 // Seed bundled skills (planning, prd, …) into ENLLM_SKILLS_DIR if absent.
 // Named volume often starts empty and would hide image-baked skills/.

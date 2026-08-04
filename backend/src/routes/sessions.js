@@ -5,7 +5,6 @@ import path from 'node:path';
 import db from '../db/index.js';
 import { ZipWriter } from '../zip-writer.js';
 import rag from '../rag.js';
-import { roleMayUseModel } from '../model-access.js';
 
 const router = express.Router();
 
@@ -172,11 +171,22 @@ router.post('/', (req, res) => {
   if (workdir && !safeWorkdir) {
     return res.status(400).json({ error: 'invalid workdir' });
   }
-  const chosen = (typeof model === 'string' && model.trim())
-    ? model.trim()
-    : (process.env.DEFAULT_MODEL || process.env.LLM_DEFAULT_MODEL || 'workspace');
-  if (!roleMayUseModel(req.user.role, chosen)) {
-    return res.status(403).json({ error: 'model not allowed for your role' });
+  const candidate = (typeof model === 'string' && model.trim()) ? model.trim() : '';
+  // Validate against the caller's own user_models. Empty candidate is
+  // allowed — the resolver picks the user's first imported model at
+  // chat time. We refuse an explicit key that's not in the user's list
+  // so an unexpected client never stores a foreign model id.
+  if (candidate) {
+    const ok = db
+      .prepare(
+        `SELECT 1 FROM user_models
+          WHERE user_id = ? AND key = ? AND enabled = 1
+          LIMIT 1`
+      )
+      .get(req.user.id, candidate);
+    if (!ok) {
+      return res.status(400).json({ error: `model "${candidate}" is not in your imported list` });
+    }
   }
   const info = db
     .prepare(
@@ -185,7 +195,7 @@ router.post('/', (req, res) => {
     )
     .run(
       title?.trim() || null,
-      chosen,
+      candidate || null,
       project_id || null,
       system_prompt || null,
       req.user.id,
@@ -235,8 +245,15 @@ router.patch('/:id', (req, res) => {
   if (model !== undefined) {
     const next = typeof model === 'string' ? model.trim() : '';
     if (!next) return res.status(400).json({ error: 'model required' });
-    if (!roleMayUseModel(req.user.role, next)) {
-      return res.status(403).json({ error: 'model not allowed for your role' });
+    const ok = db
+      .prepare(
+        `SELECT 1 FROM user_models
+          WHERE user_id = ? AND key = ? AND enabled = 1
+          LIMIT 1`
+      )
+      .get(req.user.id, next);
+    if (!ok) {
+      return res.status(400).json({ error: `model "${next}" is not in your imported list` });
     }
     fields.push('model = ?'); params.push(next);
   }

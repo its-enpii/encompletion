@@ -148,6 +148,12 @@ async function renderProjectKnowledgeBlock(projectId) {
  * Context] block. The caller must `await` this — embedding the query
  * is async.
  */
+// Mirror the floor in recalled.js so Path A (per-message RAG) doesn't
+// inject low-relevance noise into the user-prompt prefix. Without this,
+// the LLM sees top-K cosine chunks regardless of score and burns tool
+// rounds on irrelevant lookups (same hazard recalled.js comments about).
+const MIN_RAG_SCORE = 0.45;
+
 async function buildFinalPromptWithRag({ dbSession, prompt, userMsgId, attachments, reqUserId }) {
   const base = buildFinalPrompt({ dbSession, prompt, userMsgId, attachments });
   if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) return base;
@@ -162,11 +168,15 @@ async function buildFinalPromptWithRag({ dbSession, prompt, userMsgId, attachmen
     process.stderr.write(`[runs] rag query failed: ${e.message}\n`);
     return base;
   }
-  if (!hits || hits.length === 0) return base;
+  // Drop low-relevance hits before they reach the model. rag.query()
+  // already returns top-K by cosine, but with no floor a hit at 0.10
+  // still counts as "the most relevant" and gets injected verbatim.
+  const filtered = (hits || []).filter((h) => (h.score ?? 0) >= MIN_RAG_SCORE);
+  if (filtered.length === 0) return base;
   process.stderr.write(
-    `[runs] rag hits=${hits.length} top=${hits[0].label} score=${hits[0].score.toFixed(3)}\n`
+    `[runs] rag hits=${filtered.length} top=${filtered[0].label} score=${filtered[0].score.toFixed(3)}\n`
   );
-  const block = hits
+  const block = filtered
     .map((h) => `--- ${h.label} ---\n${h.content}`)
     .join('\n\n');
   const augmented = `${base}\n\n[Relevant Context]\n${block}`;
@@ -598,6 +608,10 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
   let isError = false;
   let activeMsgId = null;
   let assistantFullText = '';
+  // Captured from the `recall` event emitted by the runner. Persisted
+  // alongside the assistant message so the FE can render a "sources
+  // used" badge even on refresh / history scroll.
+  let recallHits = null;
   const pendingToolArtifacts = [];
   const pendingToolUses = new Map();
   const toolRecords = [];
@@ -649,6 +663,18 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
         if (typeof evt.text === 'string' && evt.text.length > 0) {
           assistantFullText += evt.text;
           registry.emit(runId, 'text', { sessionId: dbSession.id, text: evt.text });
+        }
+      } else if (evt.type === 'recall') {
+        // Cross-session recall summary — emitted before the first text
+        // delta so the FE can attach a "sources used" indicator to the
+        // upcoming assistant message. Payload is just identifiers +
+        // rounded scores (no chunk content on the wire).
+        if (Array.isArray(evt.hits) && evt.hits.length > 0) {
+          recallHits = evt.hits;
+          registry.emit(runId, 'recall', {
+            sessionId: dbSession.id,
+            hits: evt.hits,
+          });
         }
       } else if (
         evt.type === 'system' || evt.type === 'result' ||
@@ -805,8 +831,8 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
     const ai = db
       .prepare(
         `INSERT INTO messages
-          (session_id, role, content, cost_usd, input_tokens, output_tokens, duration_ms)
-         VALUES (?, 'assistant', ?, ?, ?, ?, ?)`
+          (session_id, role, content, cost_usd, input_tokens, output_tokens, duration_ms, recall_hits)
+         VALUES (?, 'assistant', ?, ?, ?, ?, ?, ?)`
       )
       .run(
         dbSession.id,
@@ -814,7 +840,8 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
         costUsd,
         usage?.input_tokens || 0,
         usage?.output_tokens || 0,
-        durationMs
+        durationMs,
+        recallHits ? JSON.stringify(recallHits) : null
       );
     activeMsgId = ai.lastInsertRowid;
     registry.emit(runId, 'message_saved', { messageId: activeMsgId });

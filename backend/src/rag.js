@@ -166,17 +166,13 @@ function enforceDim(incomingDim) {
  *
  * scopeUserId: limits to chunks the user can see. project_knowledge rows
  *   are filtered through the projects table; admin bypasses.
- * projectId (optional): when supplied, project knowledge and recalled
- * messages are restricted to that project; null means projectless only.
  * sessionId (optional): when set, attachment chunks are only returned
  *   if they were uploaded into this session (ephemeral recall).
+ * projectId (optional): when set, project_knowledge chunks are filtered
+ *   to the active session's project only. Without this filter, recall
+ *   could surface chunks from unrelated projects owned by the same user.
  */
-export async function query(text, {
-  topK = TOPK_DEFAULT,
-  scopeUserId = null,
-  projectId,
-  sessionId = null,
-} = {}) {
+export async function query(text, { topK = TOPK_DEFAULT, scopeUserId = null, sessionId = null, projectId = null } = {}) {
   if (!text || typeof text !== 'string' || text.trim().length === 0) return [];
   if (activeDim == null) {
     const { dim } = await embed([text]);
@@ -193,7 +189,7 @@ export async function query(text, {
   if (!queryVec) return [];
 
   // Pull candidate chunks, narrowed by scope at SQL level.
-  const rows = loadCandidateChunks({ scopeUserId, projectId, sessionId });
+  const rows = loadCandidateChunks({ scopeUserId, sessionId, projectId });
   if (rows.length === 0) return [];
 
   const scored = [];
@@ -219,52 +215,67 @@ export async function query(text, {
   }));
 }
 
-function loadCandidateChunks({ scopeUserId, projectId, sessionId }) {
+function loadCandidateChunks({ scopeUserId, sessionId, projectId }) {
   // Three shapes: project_knowledge, attachment, user_message. Each
   // joined to a different owner table. We accumulate into one array
   // and post-filter for session-exclusion below.
   // Each SELECT includes c.id so the session post-filter can drop rows
   // belonging to the current session (cross-session recall only).
   const out = [];
-  if (projectId !== undefined) {
-    const projectFilter = projectId == null ? 'p.id IS NULL' : 'p.id = ?';
-    const params = projectId == null ? [] : [Number(projectId)];
-    const r = db.prepare(
-      `SELECT c.id, c.source_kind, c.source_id, c.chunk_index, c.content, c.vec
-         FROM embeddings_chunk c
-         JOIN project_knowledge k ON k.id = c.source_id
-         JOIN projects p ON p.id = k.project_id
-        WHERE c.source_kind = 'project_knowledge'
-          AND ${projectFilter}
-          AND p.archived_at IS NULL`
-    ).all(...params);
-    out.push(...r);
-  } else if (scopeUserId != null) {
+  if (scopeUserId != null) {
     const admin = isAdmin(scopeUserId);
     if (admin) {
-      const r = db.prepare(
-        `SELECT c.id, c.source_kind, c.source_id, c.chunk_index, c.content, c.vec
-           FROM embeddings_chunk c
-           WHERE c.source_kind = 'project_knowledge'`
-      ).all();
+      // Admin: scope to a specific project only if asked. Without
+      // projectId, return every project_knowledge chunk (debug view).
+      const sql = projectId != null
+        ? `SELECT c.id, c.source_kind, c.source_id, c.chunk_index, c.content, c.vec
+             FROM embeddings_chunk c
+             JOIN projects p ON p.id = c.source_id
+            WHERE c.source_kind = 'project_knowledge'
+              AND p.id = ?`
+        : `SELECT c.id, c.source_kind, c.source_id, c.chunk_index, c.content, c.vec
+             FROM embeddings_chunk c
+            WHERE c.source_kind = 'project_knowledge'`;
+      const r = db.prepare(sql).all(...(projectId != null ? [Number(projectId)] : []));
       out.push(...r);
     } else {
-      const r = db.prepare(
-        `SELECT c.id, c.source_kind, c.source_id, c.chunk_index, c.content, c.vec
-           FROM embeddings_chunk c
-           JOIN projects p ON p.id = c.source_id
-           WHERE c.source_kind = 'project_knowledge'
-             AND p.user_id = ?
-             AND p.archived_at IS NULL`
-      ).all(Number(scopeUserId));
+      // Non-admin: filter by user ownership + (optional) project scope.
+      // The project scope is what stops recall from leaking chunks from
+      // unrelated projects owned by the same user into the active chat.
+      const sql = projectId != null
+        ? `SELECT c.id, c.source_kind, c.source_id, c.chunk_index, c.content, c.vec
+             FROM embeddings_chunk c
+             JOIN projects p ON p.id = c.source_id
+            WHERE c.source_kind = 'project_knowledge'
+              AND p.user_id = ?
+              AND p.id = ?
+              AND p.archived_at IS NULL`
+        : `SELECT c.id, c.source_kind, c.source_id, c.chunk_index, c.content, c.vec
+             FROM embeddings_chunk c
+             JOIN projects p ON p.id = c.source_id
+            WHERE c.source_kind = 'project_knowledge'
+              AND p.user_id = ?
+              AND p.archived_at IS NULL`;
+      const params = projectId != null
+        ? [Number(scopeUserId), Number(projectId)]
+        : [Number(scopeUserId)];
+      const r = db.prepare(sql).all(...params);
       out.push(...r);
     }
   } else {
-    const r = db.prepare(
-      `SELECT id, source_kind, source_id, chunk_index, content, vec
-         FROM embeddings_chunk
-         WHERE source_kind = 'project_knowledge'`
-    ).all();
+    // Unscoped path (no userId) — kept for tests + admin tooling. Honors
+    // projectId when provided so test fixtures can simulate project
+    // isolation without a userId.
+    const sql = projectId != null
+      ? `SELECT c.id, c.source_kind, c.source_id, c.chunk_index, c.content, c.vec
+           FROM embeddings_chunk c
+           JOIN projects p ON p.id = c.source_id
+          WHERE c.source_kind = 'project_knowledge'
+            AND p.id = ?`
+      : `SELECT id, source_kind, source_id, chunk_index, content, vec
+           FROM embeddings_chunk
+          WHERE source_kind = 'project_knowledge'`;
+    const r = db.prepare(sql).all(...(projectId != null ? [Number(projectId)] : []));
     out.push(...r);
   }
 
@@ -299,37 +310,23 @@ function loadCandidateChunks({ scopeUserId, projectId, sessionId }) {
   // the per-user filter for debugging.
   if (scopeUserId != null) {
     if (isAdmin(scopeUserId)) {
-      const projectFilter = projectId === undefined
-        ? ''
-        : projectId == null ? ' AND s.project_id IS NULL' : ' AND s.project_id = ?';
-      const params = projectId == null || projectId === undefined ? [] : [Number(projectId)];
       const r = db.prepare(
         `SELECT c.id, c.source_kind, c.source_id, c.chunk_index, c.content, c.vec
            FROM embeddings_chunk c
-           JOIN embeddings_session es ON es.chunk_id = c.id
-           JOIN sessions s ON s.id = es.session_id
-           WHERE c.source_kind = 'user_message'
-             ${projectFilter}`
-      ).all(...params);
+           WHERE c.source_kind = 'user_message'`
+      ).all();
       out.push(...r);
     } else {
       // messages doesn't carry user_id; hop via sessions.user_id.
       // Index on embeddings_session(session_id) covers the join.
-      const projectFilter = projectId === undefined
-        ? ''
-        : projectId == null ? ' AND s.project_id IS NULL' : ' AND s.project_id = ?';
-      const params = projectId == null || projectId === undefined
-        ? [Number(scopeUserId)]
-        : [Number(projectId), Number(scopeUserId)];
       const r = db.prepare(
         `SELECT c.id, c.source_kind, c.source_id, c.chunk_index, c.content, c.vec
            FROM embeddings_chunk c
            JOIN embeddings_session es ON es.chunk_id = c.id
            JOIN sessions s ON s.id = es.session_id
           WHERE c.source_kind = 'user_message'
-            ${projectFilter}
             AND s.user_id = ?`
-      ).all(...params);
+      ).all(Number(scopeUserId));
       out.push(...r);
     }
   }

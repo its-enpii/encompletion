@@ -114,11 +114,6 @@ export function UserMenu({ user, onLogout, collapsed = false }: { user: AuthUser
                 label="Roles"
                 onClick={() => { setOpen(false); openAdmin("admin:open-roles"); }}
               />
-              <Item
-                icon={<CpuIcon className="h-3.5 w-3.5" />}
-                label="Models"
-                onClick={() => { setOpen(false); openAdmin("admin:open-models"); }}
-              />
             </>
           )}
 
@@ -133,6 +128,11 @@ export function UserMenu({ user, onLogout, collapsed = false }: { user: AuthUser
             icon={<PromptIcon className="h-3.5 w-3.5" />}
             label="System Prompt"
             onClick={() => { setOpen(false); openAdmin("admin:open-prompt"); }}
+          />
+          <Item
+            icon={<AiIcon className="h-3.5 w-3.5" />}
+            label="AI Settings"
+            onClick={() => { setOpen(false); openAdmin("app:open-llm-settings"); }}
           />
           <div className="my-1 mx-2 border-t border-[var(--dark-4)]" />
           <Item
@@ -199,14 +199,27 @@ function ShieldIcon(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 function CpuIcon(props: React.SVGProps<SVGSVGElement>) {
+  // Legacy — kept only so a stale reference doesn't trip a TS unused-
+  // import check; the menu no longer renders it. Safe to delete later.
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
       <rect x="4" y="4" width="16" height="16" rx="2" />
       <rect x="9" y="9" width="6" height="6" />
-      <line x1="9" y1="1" x2="9" y2="4" /><line x1="15" y1="1" x2="15" y2="4" />
-      <line x1="9" y1="20" x2="9" y2="23" /><line x1="15" y1="20" x2="15" y2="23" />
-      <line x1="20" y1="9" x2="23" y2="9" /><line x1="20" y1="14" x2="23" y2="14" />
-      <line x1="1" y1="9" x2="4" y2="9" /><line x1="1" y1="14" x2="4" y2="14" />
+    </svg>
+  );
+}
+function AiIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M12 2v2" />
+      <path d="M12 20v2" />
+      <path d="m4.93 4.93 1.41 1.41" />
+      <path d="m17.66 17.66 1.41 1.41" />
+      <path d="M2 12h2" />
+      <path d="M20 12h2" />
+      <path d="m6.34 17.66-1.41 1.41" />
+      <path d="m19.07 4.93-1.41 1.41" />
+      <circle cx="12" cy="12" r="4" />
     </svg>
   );
 }

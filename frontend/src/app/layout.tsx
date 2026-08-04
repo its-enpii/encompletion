@@ -3,8 +3,10 @@ import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
 import AuthGate from "@/components/AuthGate";
+import SettingsGate from "@/components/SettingsGate";
 import UiProvider from "@/components/ui/UiProvider";
 import { ModelsProvider } from "@/lib/models";
+import { LlmSettingsProvider } from "@/lib/llmSettings";
 import { VersionWatcher } from "@/components/VersionWatcher";
 
 const inter = Inter({
@@ -36,7 +38,11 @@ export default function RootLayout({
         <AuthProvider>
           <UiProvider>
             <ModelsProvider>
-              <AuthGate>{children}</AuthGate>
+              <LlmSettingsProvider>
+                <AuthGate>
+                  <SettingsGate>{children}</SettingsGate>
+                </AuthGate>
+              </LlmSettingsProvider>
             </ModelsProvider>
           </UiProvider>
         </AuthProvider>

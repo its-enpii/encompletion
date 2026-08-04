@@ -14,6 +14,17 @@
  * hammering a broken provider; surviving ticks retry the same unindexed
  * rows on the next poll.
  *
+ * Per-user LLM settings
+ * ──────────────────────
+ * Embeddings are intentionally a global surface (EMBED_PROVIDER +
+ * LLM_BASE_URL env at the backend) — see embedder.js. The per-user
+ * LLM config that landed with this feature does NOT cover embedding
+ * credentials. The EXISTS clause in `runOnce()` filters out messages
+ * whose session owner has not configured LLM settings yet, so the
+ * per-tick embed cost is bounded the same way the other workers are.
+ * It costs the user nothing extra — they're already not chatting —
+ * but it keeps the indexer's stderr clean during onboarding.
+ *
  * Scope: sessions with a real user_id.
  * sessions are out of scope — those use their own RAG path.
  */
@@ -48,8 +59,12 @@ export function stopIndexerWorker() {
 }
 
 export async function runOnce() {
-  // Oldest un-indexed messages from platform-user sessions. ORDER BY id
-  // ASC so the oldest pending rows go first; back-fill is FIFO.
+  // Oldest un-indexed messages from sessions whose owner has
+  // configured LLM settings (EXISTS clause). Sessions without
+  // settings don't need their content indexed yet — there's no
+  // chat that could recall them. Once the user onboards, the next
+  // tick picks them up via the still-NULL last_indexed_at.
+  // ORDER BY id ASC so the oldest pending rows go first; back-fill is FIFO.
   const rows = db
     .prepare(
       `SELECT m.id AS message_id, m.session_id, m.content
@@ -57,6 +72,12 @@ export async function runOnce() {
          JOIN sessions s ON s.id = m.session_id
         WHERE m.last_indexed_at IS NULL
           AND s.user_id IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM user_llm_settings uls
+             WHERE uls.user_id = s.user_id
+               AND uls.base_url <> ''
+               AND uls.api_key_blob IS NOT NULL
+          )
         ORDER BY m.id ASC
         LIMIT ?`
     )

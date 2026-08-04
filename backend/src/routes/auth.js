@@ -58,6 +58,14 @@ router.get('/me', requireAuth, (req, res) => {
   const settings = db
     .prepare('SELECT * FROM user_settings WHERE user_id = ?')
     .get(req.user.id);
+  // Per-user LLM status — the SettingsGate reads this on every page
+  // load to decide whether to bounce to /onboarding/llm. We only
+  // surface booleans + base_url; the api_key never leaves the
+  // dedicated /api/llm-settings endpoint (which can also return
+  // the masked fingerprint for the dialog).
+  const llm = db
+    .prepare('SELECT base_url, api_key_blob FROM user_llm_settings WHERE user_id = ?')
+    .get(req.user.id);
   res.json({
     user: {
       id: req.user.id,
@@ -66,6 +74,11 @@ router.get('/me', requireAuth, (req, res) => {
       display_name: req.user.display_name || null,
     },
     settings: settings || null,
+    llm_settings: {
+      configured: !!(llm?.base_url && llm?.api_key_blob),
+      has_key: !!llm?.api_key_blob,
+      base_url_set: !!llm?.base_url,
+    },
   });
 });
 

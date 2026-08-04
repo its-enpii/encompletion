@@ -12,6 +12,7 @@ import { type Artifact } from "@/components/ArtifactViewer";
 import ArtifactPanel from "@/components/ArtifactPanel";
 import { ChatHeader, type ModelOption } from "./Header";
 import { useModels } from "@/lib/models";
+import { useLlmSettings } from "@/lib/llmSettings";
 import { getStored, setStored } from "@/lib/store";
 import { Composer } from "./Composer";
 import { MessageList } from "./MessageList";
@@ -39,6 +40,7 @@ export default function Chat({
   const params = useParams<{ id?: string }>();
   const { toast, showError, dismissError } = useUi();
   void toast;
+  const { user: me } = useAuth();
   // Track the most recent chat-level error id so a new send can
   // dismiss the previous banner (so the user doesn't see stale errors
   // next to a fresh attempt). Older banners persist until clicked.
@@ -186,7 +188,10 @@ export default function Chat({
       }
     } catch { /* best effort */ }
   }, []);
-  useEffect(() => { setStored("model", model); }, [model]);
+  useEffect(() => {
+    if (!me?.id) return;
+    setStored(`model:${me.id}`, model);
+  }, [model, me?.id]);
   useEffect(() => { setStored("effort", effort); }, [effort]);
 
   // Load projects list for the project picker.
@@ -277,6 +282,21 @@ export default function Chat({
         ) {
           // New turn: DB ends on the new user row, or live text differs from last saved assistant.
           liveAssistant = lastLocal;
+        }
+      }
+      // Decode recall_hits JSON column into a typed array so MessageBubble
+      // can render the "sources used" badge on history reloads. The DB
+      // stores it as a JSON string (or null) per messages.recall_hits.
+      for (const row of dbMsgs) {
+        if (row?.role !== "assistant") continue;
+        if (typeof row.recall_hits === "string" && row.recall_hits.length > 0) {
+          try {
+            row.recall_hits = JSON.parse(row.recall_hits);
+          } catch {
+            row.recall_hits = null;
+          }
+        } else if (row?.recall_hits == null) {
+          row.recall_hits = null;
         }
       }
       const m = liveAssistant
@@ -640,6 +660,19 @@ export default function Chat({
           }
           const id = --optimisticCounterRef.current;
           return [...cur, { id, role: "assistant", content: payload.text }];
+        });
+      },
+      recall: (payload: { sessionId: number; hits: import("./types").RecallHit[] }) => {
+        if (!isMine(payload)) return;
+        // Attach recall hits to the in-flight assistant message so the
+        // "sources used" badge shows up even before the message is saved.
+        // The badge persists via the saved row's recall_hits column once
+        // message_saved / loadSession fires.
+        setMessages((cur) => {
+          const last = cur[cur.length - 1];
+          if (!last || last.role !== "assistant") return cur;
+          if (last.recall_hits && last.recall_hits.length > 0) return cur;
+          return [...cur.slice(0, -1), { ...last, recall_hits: payload.hits }];
         });
       },
       stderr: (payload: { sessionId?: number; text: string }) => {
@@ -1250,39 +1283,41 @@ export default function Chat({
   function onManageSkills() { setShowSkillsModal(true); }
   const [showSkillsModal, setShowSkillsModal] = useState(false);
 
-  // Models registry — drives the chat-header dropdown. The admin page
-  // mutates the registry; ModelsProvider listens on `models:updated` and
-  // this consumer re-renders automatically. If the registry is still
-  // loading or failed to fetch, fall back to a hardcoded minimal set so
-  // the dropdown is never empty — "workspace" matches the previous default
-  // so existing chats stay valid.
+  // Models registry — drives the chat-header dropdown. Backend now
+  // returns the caller's own user_models (see routes/models.js) so
+  // there's no "global" fallback list to display. When the user has
+  // no models yet (no import yet, or import failed), the header
+  // shows a CTA instead of an empty dropdown.
   const { models: registryModels, loading: registryLoading } = useModels();
+  const { llm } = useLlmSettings();
   const modelOptions: ModelOption[] = useMemo(() => {
-    const fromRegistry = registryModels
+    return registryModels
       .slice()
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.id - b.id)
       .map((m) => ({ value: m.key, label: m.label }));
-    if (fromRegistry.length > 0) return fromRegistry;
-    // Last-resort fallback when the registry endpoint is unreachable AND
-    // not loading. Keys must be valid provider model ids.
-    return registryLoading
-      ? [{ value: "workspace", label: "Workspace" }]
-      : [
-          { value: "workspace", label: "Workspace" },
-          { value: "claude-sonnet-4-6", label: "Sonnet 4.6" },
-          { value: "claude-haiku-4-5", label: "Haiku 4.5" },
-        ];
-  }, [registryModels, registryLoading]);
+  }, [registryModels]);
 
-  // If the persisted/default model disappears from the registry (admin
-  // disabled it), snap back to the first enabled entry so the next
-  // message doesn't send an unknown model id to the provider.
+  // If the persisted/default model disappears from the registry (user
+  // disabled it via the AI Settings dialog), snap back to the first
+  // enabled entry so the next message doesn't send an unknown model id.
   useEffect(() => {
     if (modelOptions.length === 0) return;
     if (!modelOptions.some((o) => o.value === model)) {
       setModel(modelOptions[0].value);
     }
   }, [modelOptions, model]);
+
+  // On user switch, reset the picked model to the user's first
+  // imported model. LocalStorage scoping by user id means the picks
+  // don't leak between accounts on the same browser.
+  useEffect(() => {
+    if (!me?.id) return;
+    const stored = getStored(`model:${me.id}`);
+    if (stored) setModel(stored);
+  }, [me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const { openSettings: openLlmSettings } = useLlmSettings();
+  const chatReady = llm.configured && modelOptions.length > 0;
 
   // Regenerate an assistant message: backend deletes the old reply, then we
   // re-trigger via POST /runs with `regenerate: true` so the server reuses
@@ -1395,6 +1430,8 @@ export default function Chat({
         artifactCount={artifacts.length}
         artifactPanelOpen={showArtifactPanel}
         onToggleArtifacts={() => setShowArtifactPanel(!showArtifactPanel)}
+        needsLlmSetup={!chatReady}
+        onOpenLlmSettings={openLlmSettings}
       />
 
       <MessageList
@@ -1427,6 +1464,16 @@ export default function Chat({
         currentProjectId={projectId}
         onManageSkills={onManageSkills}
         onFiles={(files) => onFiles(files)}
+        // Disable send when the user has no LLM configured OR no
+        // imported models yet. The proactive gate avoids a 400 from
+        // POST /sessions/:id/runs when the backend refuses to start.
+        disabled={!chatReady}
+        disabledReason={!llm.configured
+          ? "Set up AI dulu"
+          : modelOptions.length === 0
+            ? "Impor model dulu"
+            : undefined}
+        onDisabledClick={openLlmSettings}
       />
 
       {showSkillsModal && (

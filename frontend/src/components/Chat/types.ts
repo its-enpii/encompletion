@@ -4,6 +4,18 @@ export type Msg = {
   content: string;
   feedback?: "like" | "dislike" | null;
   failed?: boolean;
+  // Cross-session recall hits surfaced as a "sources used" badge under
+  // assistant messages. JSON array of
+  // {source_kind, source_id, label, score} decoded from the messages
+  // row. Null/undefined when no recall was available.
+  recall_hits?: RecallHit[] | null;
+};
+
+export type RecallHit = {
+  source_kind: "project_knowledge" | "attachment" | "user_message" | string;
+  source_id: number;
+  label: string;
+  score: number;
 };
 
 export type Att = {

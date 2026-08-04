@@ -13,13 +13,21 @@
  * Idempotency: last_compacted_at bumped after run. Worker skips when
  * updated_at hasn't moved past last_compacted_at.
  *
- * Opt-out: none at v1.
+ * Per-user provider
+ * ─────────────────
+ * Each candidate session's owner is resolved via resolveProviderFor.
+ * Sessions whose owner hasn't configured their LLM (no base_url +
+ * api_key) are filtered out at SQL time — see the EXISTS clause in
+ * `runOnce()` — so the per-tick LLM cost is bounded to sessions that
+ * can actually produce a summary. A new user who hasn't onboarded yet
+ * will not generate per-tick "compactor HTTP 401" log noise.
  *
  * Cost: BATCH_MAX sessions per tick + Haiku-class model env override.
  */
 
 import db from "./db/index.js";
 import { compactTranscript } from "./compactor.js";
+import { resolveProviderFor, LLMNotConfigured } from "./llm-provider.js";
 
 const POLL_MS = Number(process.env.COMPACTOR_POLL_MS) || 5 * 60_000;
 const BATCH_MAX = Number(process.env.COMPACTOR_BATCH_MAX) || 5;
@@ -50,13 +58,22 @@ export function stopCompactorWorker() {
 
 export async function runOnce() {
   // Sessions with enough messages to need compaction, that have changed
-  // since last compaction.
+  // since last compaction, AND whose owner has configured their LLM
+  // settings (base_url + api_key set). Sessions without settings would
+  // fail every compact call; filter them out so the worker stays
+  // quiet for unconfigured users.
   const candidates = db
     .prepare(
       `SELECT s.id AS session_id, s.user_id
          FROM sessions s
         WHERE s.archived_at IS NULL
           AND s.user_id IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM user_llm_settings uls
+             WHERE uls.user_id = s.user_id
+               AND uls.base_url <> ''
+               AND uls.api_key_blob IS NOT NULL
+          )
           AND (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) > ?
           AND (s.last_compacted_at IS NULL
                OR datetime(s.last_compacted_at) < datetime(s.updated_at))
@@ -86,7 +103,28 @@ async function processSession(s) {
     const older = all.slice(0, all.length - RECENT_TAIL);
     const summarizedUpTo = older[older.length - 1].id;
 
-    const summary = await compactTranscript(older);
+    // Resolve the per-user provider. LLMNotConfigured is not possible
+    // here — the EXISTS clause in runOnce() already filtered those
+    // out — but we still defensively handle the throw so a race
+    // (settings row deleted between the SQL and this call) doesn't
+    // crash the worker.
+    let provider;
+    try {
+      provider = await resolveProviderFor(s.user_id, { defaultKind: 'compactor' });
+    } catch (e) {
+      if (e instanceof LLMNotConfigured) {
+        // The user removed their settings after we listed them. Bump
+        // last_compacted_at so we don't keep trying this session every
+        // tick.
+        db.prepare(
+          `UPDATE sessions SET last_compacted_at = CURRENT_TIMESTAMP WHERE id = ?`
+        ).run(s.session_id);
+        return;
+      }
+      throw e;
+    }
+
+    const summary = await compactTranscript(older, provider);
     if (!summary) return; // LLM hiccup — try again next tick
 
     const existing = db
@@ -100,7 +138,7 @@ async function processSession(s) {
       ).run(
         summary,
         summarizedUpTo,
-        process.env.LLM_COMPACT_MODEL || "compactor",
+        provider.model,
         s.session_id
       );
     } else {
@@ -111,7 +149,7 @@ async function processSession(s) {
         s.session_id,
         summary,
         summarizedUpTo,
-        process.env.LLM_COMPACT_MODEL || "compactor"
+        provider.model
       );
     }
     db.prepare(

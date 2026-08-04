@@ -30,23 +30,39 @@ const MIN_QUERY_LEN = 12;
 // exhausts max tool-call rounds).
 const MIN_RECALL_SCORE = 0.45;
 
-export async function renderRecalledContextBlock(userId, query, sessionId = null) {
-  if (!userId || typeof query !== 'string') return '';
-  const trimmed = query.trim();
-  if (trimmed.length < MIN_QUERY_LEN) return '';
+export async function renderRecalledContextBlock(userId, query, sessionId = null, projectId = null) {
+  const { block } = await resolveRecall(userId, query, sessionId, projectId);
+  return block;
+}
 
-  let hits;
+/**
+ * Same as renderRecalledContextBlock but also returns the raw hits so
+ * the runner can emit a recall event to the FE for the "sources used"
+ * badge. Returns { block, hits } where hits is an array of
+ * { source_kind, source_id, label, score } (no content — keeps the
+ * payload small and avoids leaking chunk text to the wire).
+ */
+export async function resolveRecall(userId, query, sessionId = null, projectId = null) {
+  if (!userId || typeof query !== 'string') return { block: '', hits: [] };
+  const trimmed = query.trim();
+  if (trimmed.length < MIN_QUERY_LEN) return { block: '', hits: [] };
+
+  let rawHits;
   try {
-    hits = await rag.query(trimmed, {
+    rawHits = await rag.query(trimmed, {
       topK: RECALLED_TOPK,
       scopeUserId: userId,
       sessionId,
+      // Limit project_knowledge chunks to the active session's project so
+      // a chunk from another project owned by the same user doesn't leak
+      // into this chat's recall block.
+      projectId,
     });
   } catch {
-    return '';
+    return { block: '', hits: [] };
   }
-  const filtered = (hits || []).filter((h) => (h.score ?? 0) >= MIN_RECALL_SCORE);
-  if (filtered.length === 0) return '';
+  const filtered = (rawHits || []).filter((h) => (h.score ?? 0) >= MIN_RECALL_SCORE);
+  if (filtered.length === 0) return { block: '', hits: [] };
 
   // Dedup near-identical snippets. After many test runs (or a user
   // asking the same thing repeatedly) the same chunk text accumulates
@@ -68,7 +84,17 @@ export async function renderRecalledContextBlock(userId, query, sessionId = null
     return `- (${label}) ${excerpt}`;
   });
 
-  return `<system>\nRecalled context from your past chats (most relevant first):\n${lines.join('\n')}\n</system>`;
+  const block = `<system>\nRecalled context from your past chats (most relevant first):\n${lines.join('\n')}\n</system>`;
+  // Strip content/score.fractional-numbers and keep just identifiers +
+  // rounded score so the FE can render "3 sources" without shipping
+  // chunk bodies over the wire.
+  const hits = deduped.map((h) => ({
+    source_kind: h.source_kind,
+    source_id: h.source_id,
+    label: h.source_kind === 'user_message' ? `past-message` : h.label,
+    score: Number((h.score ?? 0).toFixed(3)),
+  }));
+  return { block, hits };
 }
 
 export const _internals = { RECALLED_TOPK, RECALLED_SNIPPET_MAX, MIN_QUERY_LEN, MIN_RECALL_SCORE };

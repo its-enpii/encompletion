@@ -267,6 +267,15 @@ function migrate() {
   }
   db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_unindexed ON messages(last_indexed_at, id)`);
 
+  // Recall hits per assistant message — sources actually surfaced from
+  // the cross-session RAG recall block. JSON-encoded array of
+  // {source_kind, source_id, label, score}. NULL means no recall was
+  // available (short query, no hits above the score floor, or recall
+  // was skipped). Used by the FE to render a "sources used" badge.
+  if (!msgCols.includes("recall_hits")) {
+    db.exec("ALTER TABLE messages ADD COLUMN recall_hits TEXT");
+  }
+
   // Per-user customizable system prompt. NULL or empty string means "use
   // the hardcoded default in llm-runner.js" — no behavior change for
   // users who haven't customized. Read at chat time inside runLLM().
@@ -293,27 +302,39 @@ function migrate() {
     CREATE INDEX IF NOT EXISTS idx_models_enabled ON models(enabled, sort_order);
   `);
 
-  // Seed defaults once. Only inserts when the table is completely empty —
-  // never overwrites whatever the admin has configured. The labels mirror
-  // the previous hardcoded UI list so existing chats still resolve a label.
-  const count = db.prepare('SELECT COUNT(*) AS n FROM models').get().n;
-  // Seed defaults once. Only inserts when the table is completely empty —
-  // never overwrites whatever the admin has configured.
-  //
-  // Why these specific keys: they are the IDs the engine's CLI accepts
-  // out of the box. Generic names like 'standard' / 'fast' are NOT valid
-  // upstream model ids and would cause every prompt to come back with
-  // "issue with the selected model" — the user sees zero text and
-  // thinks the app is broken. Keep keys aligned with what the CLI
-  // understands; let admins rename the *label* freely in /models.
-  if (count === 0) {
-    const seed = db.prepare(
-      `INSERT INTO models (key, label, enabled, sort_order) VALUES (?, ?, 1, ?)`
+  // Per-user LLM configuration — every authenticated user brings their own
+  // provider endpoint + API key. base_url is plaintext (it shows up in
+  // network tabs on every chat request anyway, so encrypting it adds no
+  // security). api_key_blob is base64(AES-GCM iv || ciphertext || tag),
+  // produced by crypto-secrets.js. A NULL api_key_blob means the user
+  // has a base_url but no key yet — `configured` flips back to false so
+  // the chat gate re-engages. compaction_model + extraction_model are
+  // optional overrides; NULL = "use the user's first imported model".
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS user_llm_settings (
+      user_id          INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      base_url         TEXT NOT NULL DEFAULT '',
+      api_key_blob     TEXT,
+      compaction_model TEXT,
+      extraction_model TEXT,
+      created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP
     );
-    seed.run('workspace', 'Workspace', 0);
-    seed.run('claude-sonnet-4-6', 'Sonnet 4.6', 10);
-    seed.run('claude-haiku-4-5', 'Haiku 4.5', 20);
-  }
+
+    CREATE TABLE IF NOT EXISTS user_models (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      key         TEXT NOT NULL,
+      label       TEXT NOT NULL,
+      enabled     INTEGER NOT NULL DEFAULT 1,
+      sort_order  INTEGER NOT NULL DEFAULT 0,
+      created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_models_enabled
+      ON user_models(user_id, enabled, sort_order);
+  `);
 
   // Project-level skill overrides: per-project opt-out list of skill
   // names from the global catalog. Stored as JSON text (SQLite has no

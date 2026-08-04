@@ -22,6 +22,7 @@ export type RunEventName =
   | "start"
   | "system"
   | "text"
+  | "recall"
   | "stderr"
   | "tool_use"
   | "tool_result"
@@ -96,7 +97,7 @@ export function subscribeRun(opts: SubscribeRunOpts): { unsubscribe: () => void;
   // Wire typed handlers. Skip keys starting with "on" that aren't real
   // event names (onOpen / onError are special, not SSE events).
   const TYPED: RunEventName[] = [
-    "start", "system", "text", "stderr",
+    "start", "system", "text", "recall", "stderr",
     "tool_use", "tool_result", "artifact", "artifact_dup", "artifact_rejections",
     "message_saved", "result", "stopped", "tick", "done", "error",
   ];
