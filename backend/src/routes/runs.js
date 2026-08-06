@@ -21,7 +21,7 @@ import { runLLM } from '../llm-runner.js';
 import { renderProjectMemoryFactsBlock } from '../project_memory.js';
 import rag from '../rag.js';
 import registry from '../run-registry.js';
-import { roleMayUseModel } from '../model-access.js';
+import { roleMayUseModel, userMayUseModel } from '../model-access.js';
 import { selectHistoryRows } from '../history.js';
 import { renderArtifactManifestBlock } from '../artifact-context.js';
 import { extractText } from '../extractors.js';
@@ -424,20 +424,18 @@ router.post('/sessions/:id/runs', requireAuth, async (req, res) => {
     // Switch model for this turn when client sends a key.
     if (typeof model === 'string' && model.trim() && model.trim() !== dbSession.model) {
       const next = model.trim();
-      if (!roleMayUseModel(req.user.role, next)) {
-        return res.status(403).json({ error: 'model not allowed for your role' });
+      if (!userMayUseModel(req.user.id, next)) {
+        return res.status(400).json({ error: `model "${next}" is not in your imported list` });
       }
       db.prepare(
         `UPDATE sessions SET model = ?, updated_at = ? WHERE id = ?`
       ).run(next, new Date().toISOString(), dbSession.id);
       dbSession = db.prepare('SELECT * FROM sessions WHERE id = ?').get(dbSession.id);
-    } else if (!roleMayUseModel(req.user.role, dbSession.model)) {
-      return res.status(403).json({ error: 'session model not allowed for your role' });
     }
   } else {
     const chosen = (typeof model === 'string' && model.trim()) ? model.trim() : fallbackModel;
-    if (!roleMayUseModel(req.user.role, chosen)) {
-      return res.status(403).json({ error: 'model not allowed for your role' });
+    if (typeof model === 'string' && model.trim() && !userMayUseModel(req.user.id, chosen)) {
+      return res.status(400).json({ error: `model "${chosen}" is not in your imported list` });
     }
     const info = db
       .prepare(

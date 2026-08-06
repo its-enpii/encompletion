@@ -43,3 +43,13 @@ export function listRoleIds() {
     .all()
     .map((r) => r.id);
 }
+
+export function userMayUseModel(userId, modelKey) {
+  if (!userId || !modelKey || typeof modelKey !== 'string') return false;
+  const key = modelKey.trim();
+  if (!key) return false;
+  const ok = db
+    .prepare('SELECT 1 FROM user_models WHERE user_id = ? AND key = ? AND enabled = 1 LIMIT 1')
+    .get(userId, key);
+  return !!ok;
+}
